@@ -1,7 +1,7 @@
 # TASKS.md — krx-signal-briefing
 
 > 기준: `SPEC.md` v1.1 · `PLAN.md` v1.0 (2026-08-26)
-> 저장소: `daehyub71/krx-signal-briefing` (public, **미생성**) · 트리거: 상위 `alert.yml` → `repository_dispatch` · 예비 cron 평일 09:05 KST
+> 저장소: `daehyub71/krx-signal-briefing` (public) · 트리거: 상위 `alert.yml` → `repository_dispatch` · 예비 cron 평일 09:05 KST
 > 체크할 때마다 아래 대시보드를 함께 갱신한다. 마일스톤을 닫을 때는 **ruff · mypy strict · pytest 전부 통과**가 전제다.
 
 ---
@@ -10,13 +10,13 @@
 
 | 마일스톤 | 진도 | % | 태스크 | 상태 |
 |----------|------|---|--------|------|
-| M0 뼈대 + 걷는 해골 | `████████░░` | 75% | 9/12 | 🔄 |
-| M1 DART 계층 ★ TDD | `░░░░░░░░░░` | 0% | 0/10 | 🔜 |
+| M0 뼈대 + 걷는 해골 | `██████████` | 100% | 12/12 | ✅ 2026-08-26 |
+| M1 DART 계층 ★ TDD | `░░░░░░░░░░` | 0% | 0/10 | 🔜 다음 |
 | M2 본문·저장·발송 | `░░░░░░░░░░` | 0% | 0/9 | 🔜 |
 | M3 Claude 요약 | `░░░░░░░░░░` | 0% | 0/8 | 🔜 |
 | M4 자동화·배포 | `░░░░░░░░░░` | 0% | 0/11 | 🔜 |
 | M5 마무리 | `░░░░░░░░░░` | 0% | 0/5 | 🔜 |
-| **전체** | `██░░░░░░░░` | **16%** | **9/55** | 🔄 M0 |
+| **전체** | `██░░░░░░░░` | **22%** | **12/55** | 🔄 M1 대기 |
 
 범례: 🔜 대기 · 🔄 진행중 · ✅완료일
 
@@ -25,7 +25,7 @@
 | 시점 | 항목 | 상태 |
 |------|------|------|
 | M0 전 | OpenDART 인증키 (opendart.fss.or.kr, 무료·즉시) → `.env` `DART_API_KEY` | ✅ 2026-08-26 연결 확인 |
-| M0 전 | 깃허브 리포 `krx-signal-briefing` 생성 (public) | ⏳ |
+| M0 전 | 깃허브 리포 `krx-signal-briefing` 생성 (public) | ✅ 2026-08-26 첫 푸시 |
 | M3 전 | Anthropic API 키 → `.env` `ANTHROPIC_API_KEY` | ✅ 2026-08-26 연결 확인 |
 | M4 | fine-grained PAT (대상 `krx-signal-briefing` 1개 · Contents write · 1년) → 상위 리포 Secrets `BRIEFING_DISPATCH_TOKEN` | ⏳ |
 | M4 | 이 리포 Secrets 8종 등록 | ⏳ |
@@ -45,12 +45,12 @@
 - [x] `briefing/graph.py` — `build_graph(overrides)`: 노드·엣지 · `route_gate` 조건부 · `gate→wait→gate` 사이클 · `Send` fan-out · `RetryPolicy` · `recursion_limit=40` (아래 ①)
 - [x] `briefing/main.py` — `--date` · `--dry-run` · `--force` · `--if-not-briefed` → 초기 상태 → `invoke()`. 스텁 상태로 START→END 완주 (`status=no_signals` · exit 0) · `store.py` 연결·`briefed_today()` · 테스트 11개
 - [x] `tests/conftest.py` `wiring()` + `tests/test_graph.py` — ① 게이트 ready/stale/missing 3경로 ② missing 10회 → `record_run` → `finalize(gate_timeout)` ③ **Send N개 → reducer 합류** (+ 0건 직행) ④ `summarize`·`send_email` 실패 시 `record_run` 도달 — 테스트 8개 (아래 ②)
-- [ ] `supabase/schema.sql`(`ksb_briefings` · `ksb_runs` · CHECK · RLS) + `scripts/apply_schema.py` → 실DB 적용 · **anon 쓰기 차단 확인**
-- [ ] `store.py` 게이트 조회만 실구현 → `python -m briefing.main --dry-run`이 오늘 `ksa_runs`를 읽고 ready/missing을 찍는다
-- [ ] `scripts/export_graph.py` → `docs/GRAPH.md` · `ci.yml`(ruff·mypy·pytest) · `git init` · 리포 연결 · 첫 푸시 · CI 녹색
+- [x] `supabase/schema.sql`(`ksb_briefings` · `ksb_runs` · CHECK · RLS) + `scripts/apply_schema.py --verify` → 실DB 적용 · **anon SELECT 허용 · INSERT 42501 차단 확인** (트랜잭션 안에서 롤백)
+- [x] `store.py` 게이트 조회(`fetch_today_run`) 실구현 → `--dry-run`이 실DB에서 `status=ok data_date=2026-08-25 → ready` 출력 · `gate` 노드 테스트 5개
+- [x] `scripts/export_graph.py` → `docs/GRAPH.md` · `ci.yml` · `git init` · README 2종 · 시크릿 스캔 · 첫 푸시 · **CI 녹색** (2026-08-26)
 
-**완료 기준**
-- 배선 테스트 4종 통과 · 실DB 게이트 동작 · `ksb_*` RLS 검증 · CI 녹색
+**완료 기준 — 전부 충족 (2026-08-26)**
+- 배선 테스트 4종 통과(테스트 총 51개) · 실DB 게이트 동작 · `ksb_*` RLS 검증 · CI 녹색
 
 **구현하며 조정한 것** (2026-08-26)
 

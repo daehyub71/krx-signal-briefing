@@ -113,4 +113,10 @@ pytest tests/ -v    # 3. 테스트
 
 ## 진행 상태
 
-**M0 진행 중** (2026-08-26). 진도는 `docs/TASKS.md` 대시보드 참조.
+**M0 완료** (2026-08-26) · M1(DART 계층) 대기. 진도는 `docs/TASKS.md` 대시보드 참조.
+
+| 항목 | 값 |
+|------|-----|
+| 저장소 | `daehyub71/krx-signal-briefing` (**public**) |
+| 테스트 | 51 · ruff · mypy strict 통과 · CI 녹색 |
+| DB | `ksb_briefings` · `ksb_runs` 생성, RLS 확인 |
