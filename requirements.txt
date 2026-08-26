@@ -1,0 +1,7 @@
+langgraph>=1.2,<2
+anthropic>=0.40
+supabase>=2.31,<3
+# ksa_* 조회·ksb_* 쓰기는 REST로도 되지만, 드라이런의 이력 조회는 1000행 절단을 피해 직접 SQL로 한다 — 런타임 의존성이다.
+psycopg[binary]>=3.2
+# macOS 파이썬은 CA 번들이 없다. SMTP STARTTLS에 명시적으로 쓴다.
+certifi>=2024.0

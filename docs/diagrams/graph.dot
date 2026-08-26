@@ -1,0 +1,64 @@
+digraph briefing {
+  graph [fontname="Apple SD Gothic Neo", fontsize=13, rankdir=TB, nodesep=0.45, ranksep=0.5, pad=0.4, bgcolor="white",
+         label="krx-signal-briefing — LangGraph 그래프 (PLAN §1-1 · SPEC D10)", labelloc=t, labeljust=l];
+  node  [fontname="Apple SD Gothic Neo", fontsize=12, shape=box, style="rounded,filled", fillcolor="#F4F6FA", color="#3D465F", penwidth=1.2, margin="0.18,0.08"];
+  edge  [fontname="Apple SD Gothic Neo", fontsize=10, color="#3D465F", arrowsize=0.8];
+
+  START [shape=circle, label="", width=0.22, fillcolor="#121829", color="#121829"];
+  END   [shape=doublecircle, label="", width=0.22, fillcolor="#121829", color="#121829"];
+
+  // 게이트 (I/O)
+  gate         [label=<<b>gate</b><br/><font point-size="10">F1 · ksa_runs 오늘 행 조회</font>>, fillcolor="#FFF4E0"];
+  route_gate   [shape=diamond, style="filled", fillcolor="#FFFFFF", label=<route_gate<br/><font point-size="10">조건부 엣지</font>>, height=0.9];
+  wait         [label=<<b>wait</b><br/><font point-size="10">60초 대기 · attempts += 1</font>>, fillcolor="#FFF4E0"];
+
+  // 입력 (I/O)
+  load_signals [label=<<b>load_signals</b><br/><font point-size="10">F2 · ksa_signals + 기존 ksb_briefings(멱등)</font>>, fillcolor="#FFF4E0"];
+  load_corps   [label=<<b>load_corps</b><br/><font point-size="10">F3 · corpCode.xml 1회 → {ticker: corp_code}</font>>, fillcolor="#FFF4E0"];
+
+  // fan-out
+  fetch_one    [label=<<b>fetch_one × N</b>  <font point-size="10">(종목당 Send)</font><br/><font point-size="10">F4 list.json 1회 → F5 판정 → F6 리츠 예외 → Briefing<br/>조회 실패는 level='error'로 반환 · raise 안 함</font>>, fillcolor="#FFF4E0", peripheries=2];
+  join         [shape=point, width=0.12, fillcolor="#3D465F", color="#3D465F"];
+
+  // LLM
+  summarize    [label=<<b>summarize</b><br/><font point-size="10">F14 · Claude Opus 5 1회 일괄 · 예외 불투과<br/>실패·키 없음 → summary_error</font>>, fillcolor="#E8F0FB"];
+
+  // 순수
+  render       [label=<<b>render</b><br/><font point-size="10">F7·F8 · 순수 함수 (subject · text · html)</font>>, fillcolor="#EAF7EC"];
+
+  // 출력 (I/O)
+  persist      [label=<<b>persist</b><br/><font point-size="10">F9 · ksb_briefings upsert (dry-run 시 생략)</font>>, fillcolor="#FFF4E0"];
+  send_email   [label=<<b>send_email</b><br/><font point-size="10">F10 · Gmail SMTP · 예외 불투과 → SendResult</font>>, fillcolor="#FFF4E0"];
+  record_run   [label=<<b>record_run</b><br/><font point-size="10">ksb_runs · 실패해도 먼저 기록</font>>, fillcolor="#FFF4E0"];
+  finalize     [label=<<b>finalize</b><br/><font point-size="10">gate_timeout · dart_partial · send_failed면<br/>여기서만 raise (N5)</font>>, fillcolor="#FBE9EC"];
+
+  START -> gate;
+  gate -> route_gate [arrowhead=none];
+  route_gate -> wait         [label="  missing (attempts < 10) — 상위가 record_run 전에 죽은 경우", color="#B8860B", fontcolor="#B8860B"];
+  wait -> gate               [label="  사이클", color="#B8860B", fontcolor="#B8860B", constraint=false];
+  route_gate -> record_run   [label="  missing (10회) → gate_timeout · 기록이 먼저", color="#C9283E", fontcolor="#C9283E"];
+  route_gate -> render       [label="  stale → 신호 없이 [브리핑 없음] (D8)", color="#626D8A", fontcolor="#626D8A"];
+  route_gate -> load_signals [label="  ready", color="#1F63A8", fontcolor="#1F63A8"];
+
+  load_signals -> load_corps;
+  load_corps -> fetch_one    [label="  fan-out · Send() × N", style=dashed];
+  load_corps -> summarize    [label="  신호 0건", style=dotted, color="#626D8A", fontcolor="#626D8A"];
+  fetch_one -> join          [label="  reducer: briefings += (operator.add)", style=dashed, arrowhead=none];
+  join -> summarize;
+  summarize -> render;
+  render -> persist;
+  persist -> send_email;
+  send_email -> record_run;
+  record_run -> finalize;
+  finalize -> END;
+
+  // 범례
+  subgraph cluster_legend {
+    label="범례"; fontsize=11; style="rounded"; color="#C5CAD6";
+    l_io   [label="I/O 노드 (DB · HTTP · SMTP)", fillcolor="#FFF4E0", fontsize=10];
+    l_llm  [label="LLM 노드 (있으면 좋은 층)", fillcolor="#E8F0FB", fontsize=10];
+    l_pure [label="순수 함수 노드", fillcolor="#EAF7EC", fontsize=10];
+    l_fail [label="실패 판정 (유일한 raise)", fillcolor="#FBE9EC", fontsize=10];
+    l_io -> l_llm -> l_pure -> l_fail [style=invis];
+  }
+}

@@ -1,0 +1,90 @@
+"""Supabase 읽기·쓰기.
+
+| 경로 | 쓰는 곳 | 이유 |
+|------|---------|------|
+| psycopg (직접 SQL) | `ksa_*` 읽기 · 게이트 | 1,000행 절단 없음 · 시간대 변환이 SQL에서 끝남 |
+| supabase-py (REST) | `ksb_*` 쓰기 | 소량이고 upsert가 간단하다 |
+
+`ksa_*`·`ksc_*`에는 절대 쓰지 않는다 — 상위 프로젝트 소유다.
+M0: 연결과 게이트 조회만. 나머지는 TODO(M2).
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from typing import Any
+
+import psycopg
+
+from briefing import config
+
+_conn: psycopg.Connection[Any] | None = None
+
+
+def conn() -> psycopg.Connection[Any]:
+    """배치용 공유 연결. 노드마다 새로 붙지 않는다 — `close()`로 닫는다.
+
+    Note:
+        URL은 트랜잭션 풀러(6543)다. 프리페어드 스테이트먼트를 재사용하지 못하므로
+        `prepare_threshold=None`으로 끈다 (상위 프로젝트와 동일).
+    """
+    global _conn
+    if _conn is None or _conn.closed:
+        _conn = psycopg.connect(config.require("SUPABASE_DATABASE_URL"), prepare_threshold=None)
+    return _conn
+
+
+def close() -> None:
+    """공유 연결을 닫는다. `main`이 끝낼 때 부른다."""
+    global _conn
+    if _conn is not None and not _conn.closed:
+        _conn.close()
+    _conn = None
+
+
+# ── ksa_runs (읽기만) ────────────────────────────────────────────
+
+
+def fetch_today_run(c: psycopg.Connection[Any], run_date: date) -> tuple[date | None, str] | None:
+    """오늘(KST) 상위 배치의 마지막 실행 기록 — 게이트 판정 근거 (F1).
+
+    Args:
+        c: DB 연결.
+        run_date: 실행 기준일 (KST 날짜).
+
+    Returns:
+        `(data_date, status)`. 그날 행이 없으면 None. `data_date`는 상위가 조회에
+        실패한 날 null일 수 있다(`stale_data`).
+
+    Note:
+        상위는 저장 후 발송하므로 `send_failed`여도 신호는 있다. 상태 해석은 노드가 한다.
+    """
+    row = c.execute(
+        "select data_date, status from ksa_runs"
+        " where (run_at at time zone 'Asia/Seoul')::date = %s"
+        " order by run_at desc limit 1",
+        (run_date,),
+    ).fetchone()
+    return (row[0], str(row[1])) if row else None
+
+
+# ── ksb_runs ────────────────────────────────────────────────────
+
+
+def briefed_today(c: psycopg.Connection[Any], run_date: date) -> bool:
+    """오늘(KST) 이미 브리핑이 돌았는가 — 예비 cron의 no-op 판정 (F0 · `--if-not-briefed`).
+
+    Args:
+        c: DB 연결.
+        run_date: 실행 기준일 (KST 날짜).
+
+    Returns:
+        `ksb_runs`에 그날 행이 하나라도 있으면 True. 상태는 보지 않는다 —
+        실패로 끝난 날도 "돌았다"이며, 다시 돌리려면 `--force`로 수동 실행한다.
+    """
+    row = c.execute(
+        "select exists(select 1 from ksb_runs"
+        " where (run_at at time zone 'Asia/Seoul')::date = %s)",
+        (run_date,),
+    ).fetchone()
+    return bool(row[0]) if row else False

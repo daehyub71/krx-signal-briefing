@@ -1,0 +1,52 @@
+digraph modules {
+  graph [fontname="Apple SD Gothic Neo", fontsize=13, rankdir=TB, nodesep=0.35, ranksep=0.55, pad=0.4, bgcolor="white", compound=true,
+         label="krx-signal-briefing — 3층 분리와 모듈 의존 방향 (PLAN §3 · SPEC N3)", labelloc=t, labeljust=l];
+  node  [fontname="Apple SD Gothic Neo", fontsize=12, shape=box, style="rounded,filled", color="#3D465F", penwidth=1.2, margin="0.16,0.08"];
+  edge  [fontname="Apple SD Gothic Neo", fontsize=10, color="#3D465F", arrowsize=0.8];
+
+  subgraph cluster_graph {
+    label=<<b>그래프 층</b> — LangGraph를 아는 유일한 층 · 노드 ≤ 20줄 (N11)>; style="rounded,filled"; fillcolor="#F3F0FA"; color="#9C8AD1";
+    main  [label=<main.py<br/><font point-size="10">CLI · 기준일 주입 · --dry-run · --force</font>>, fillcolor="#FFFFFF"];
+    graph_ [label=<graph.py<br/><font point-size="10">배선 · overrides · recursion_limit</font>>, fillcolor="#FFFFFF"];
+    nodes [label=<nodes.py<br/><font point-size="10">상태 입출력만</font>>, fillcolor="#FFFFFF"];
+    state [label=<state.py<br/><font point-size="10">BriefingState · reducer</font>>, fillcolor="#FFFFFF"];
+    main -> graph_ -> nodes; graph_ -> state [style=dashed];
+  }
+
+  subgraph cluster_io {
+    label=<<b>I/O 층</b> — 부수효과를 아는 유일한 곳 · 테스트는 전부 mock>; style="rounded,filled"; fillcolor="#FFFBF2"; color="#E0B458";
+    store  [label=<store.py<br/><font point-size="10">ksa_* SELECT · ksb_* upsert</font>>, fillcolor="#FFF4E0"];
+    dart   [label=<dart.py<br/><font point-size="10">urllib · 013/020 · 키 마스킹</font>>, fillcolor="#FFF4E0"];
+    llm    [label=<llm.py<br/><font point-size="10">anthropic SDK · refusal 처리</font>>, fillcolor="#FFF4E0"];
+    notify [label=<notify.py<br/><font point-size="10">smtplib · STARTTLS</font>>, fillcolor="#FFF4E0"];
+    config [label=<config.py<br/><font point-size="10">.env · Secrets</font>>, fillcolor="#FFF4E0"];
+  }
+
+  subgraph cluster_pure {
+    label=<<b>도메인 층</b> — 순수 함수 · DB·HTTP·LLM·LangGraph를 모른다 · <b>TDD 대상</b>>; style="rounded,filled"; fillcolor="#F0F9F1"; color="#5FA86B";
+    corp    [label=<corp.py<br/><font point-size="10">CORPCODE.xml → {ticker: corp_code}</font>>, fillcolor="#EAF7EC"];
+    flags   [label=<flags.py<br/><font point-size="10">정규화 · 규칙표 · classify · 리츠 예외</font>>, fillcolor="#EAF7EC"];
+    render  [label=<render.py<br/><font point-size="10">subject · text · html · 금지어</font>>, fillcolor="#EAF7EC"];
+    summary [label=<summary.py<br/><font point-size="10">LLM 입력 구성 · 스키마 · validate</font>>, fillcolor="#EAF7EC"];
+    models  [label=<<b>models.py</b><br/><font point-size="10">Briefing · Flag · Disclosure · SendResult<br/>아무것도 import하지 않는다</font>>, fillcolor="#FFFFFF", penwidth=1.8];
+  }
+
+  subgraph cluster_ext {
+    label=<<b>외부</b>>; style="rounded,filled"; fillcolor="#FAFBFD"; color="#C5CAD6";
+    e_db  [label="Supabase\n(supabase-py · psycopg)", fillcolor="#EEF0F5"];
+    e_dart [label="OpenDART", fillcolor="#EEF0F5"];
+    e_ant [label="Anthropic API", fillcolor="#EEF0F5"];
+    e_smtp [label="Gmail SMTP", fillcolor="#EEF0F5"];
+  }
+
+  nodes -> store; nodes -> dart; nodes -> llm; nodes -> notify;
+  nodes -> flags [color="#2E7D32"]; nodes -> render [color="#2E7D32"];
+  dart -> corp [color="#2E7D32"]; llm -> summary [color="#2E7D32"];
+  store -> e_db; dart -> e_dart; llm -> e_ant; notify -> e_smtp;
+  main -> config [style=dashed];
+  corp -> models [style=dashed, color="#9AA3B8"]; flags -> models [style=dashed, color="#9AA3B8"];
+  render -> models [style=dashed, color="#9AA3B8"]; summary -> models [style=dashed, color="#9AA3B8"];
+
+  note [shape=note, fillcolor="#FFFFFF", fontsize=10, label="화살표는 한 방향이다.\n도메인 층 → I/O 층 import는 리뷰에서 막는다.\nLangGraph를 걷어내도 도메인 코드는 그대로 살아 있어야 한다."];
+  models -> note [style=invis];
+}

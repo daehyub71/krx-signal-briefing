@@ -1,0 +1,98 @@
+# krx-signal-briefing
+
+> 🇰🇷 한국어: [README_KO.md](README_KO.md)
+
+**A second morning e-mail that attaches recent DART filings to each stock signal.**
+
+[krx-signal-alerts](https://github.com/daehyub71/krx-signal-alerts) screens every KRX stock against five
+technical strategies and mails the hits at 08:20 KST. That mail only says *"the chart conditions are met"*.
+It cannot tell a clean breakout from one that sits on top of a convertible-bond issue announced last week.
+
+This project fills that gap. When the upstream workflow finishes, it wakes up, reads the same signals,
+pulls each company's filings from the last 30 days via **OpenDART**, grades them with a transparent
+keyword rule table (🔴 / 🟡), asks **Claude Opus 5** for a one-line factual summary, and sends a second mail
+that lines up 1:1 with the first.
+
+> **Status: M0 (skeleton) in progress** — SPEC v1.1 / PLAN v1.0 fixed on 2026-08-26. Not yet deployed.
+
+## What the second mail looks like
+
+```
+가비아 [079940] 46,000원 +1.32%
+  ✓ 월봉 종가 > MA20 : …            ← the five condition lines from the first mail, verbatim
+  ─────────────────────────────────────────────
+  🔴 공시  최근 30일 4건 · 위험 유형 2건
+           · 08/22 전환사채권발행결정          [원문]  ← 🔴
+           · 08/11 최대주주변경                [원문]  ← 🔴
+           · 08/05 분기보고서                  [원문]
+  💬 08/22 CB 발행 결정, 08/11 최대주주 변경 — 최근 30일 위험 유형 2건
+```
+
+Facts only, every filing linked to its DART original, no buy/sell language. A stock with nothing flagged
+says *"no risk type confirmed among filings in the last 30 days"* — never *"no risk"*.
+
+## Architecture
+
+![System overview](docs/arch-overview.png)
+
+- **Read-only consumer** of the upstream tables (`ksa_signals`, `ksa_runs`). Writes only to its own `ksb_*` tables in the same Supabase project.
+- **Triggered by `repository_dispatch`** from the last step of the upstream `alert.yml`, so it starts within seconds of the signal mail. A backup cron (09:05 KST) covers a missed dispatch and is a no-op if the day already ran.
+- **LangGraph** state graph with a DB gate (retry 1 min × 10), per-ticker `Send()` fan-out for DART lookups, and an isolated `summarize` node — if the LLM fails, the mail still goes out with a warning line.
+
+![LangGraph graph](docs/graph.png)
+
+Three layers, same rules as the upstream project: the graph layer is the only place that knows LangGraph;
+the domain layer (`corp` · `flags` · `render` · `summary`) is pure functions and the TDD target; the I/O layer
+(`dart` · `llm` · `store` · `notify`) is the only place with side effects.
+
+![Module dependencies](docs/modules.png)
+
+## Stack
+
+Python 3.11 · LangGraph · Anthropic SDK (`claude-opus-5`, one batched call per day) · OpenDART REST (`corpCode.xml` + `list.json`, ~16 calls/day) ·
+Supabase (psycopg + supabase-py) · Gmail SMTP · GitHub Actions · pytest / ruff / mypy (strict)
+
+## Setup
+
+```bash
+cd krx-signal-briefing
+python3.11 -m venv venv && source venv/bin/activate
+pip install -r requirements-dev.txt
+cp .env.example .env           # fill in DART_API_KEY, ANTHROPIC_API_KEY, Supabase, Gmail
+python scripts/apply_schema.py --verify   # create ksb_* tables, confirm anon cannot write
+```
+
+## Run
+
+```bash
+python -m briefing.main --dry-run            # no persist, no mail
+python -m briefing.main --date 20260825      # reproduce a past day
+python -m briefing.main --force              # rebuild even if today's briefing exists
+python -m briefing.main --if-not-briefed     # backup-cron mode: no-op if already run today
+```
+
+## Verify
+
+```bash
+ruff check . && mypy && pytest -q
+python scripts/export_graph.py               # regenerate docs/GRAPH.md after changing the graph
+```
+
+## Docs
+
+| File | Content |
+|---|---|
+| [docs/SPEC.md](docs/SPEC.md) | Requirements (F/N/R IDs), decisions D1–D11, data model, wording rules |
+| [docs/PLAN.md](docs/PLAN.md) | Architecture, graph design, milestones M0–M5, test strategy |
+| [docs/TASKS.md](docs/TASKS.md) | Progress dashboard, task checklist, troubleshooting log |
+| [docs/GRAPH.md](docs/GRAPH.md) | Auto-generated mermaid of the compiled graph |
+
+## Boundaries
+
+- **Not investment advice.** The mail lists filings; it never recommends, rates, or predicts.
+- **Single recipient.** Distributing interpreted signals to others would fall under Korean investment-advisory regulation.
+- Only filings within the 30-day window are seen. Anything outside it — or inside a report body — is not.
+
+## License
+
+MIT

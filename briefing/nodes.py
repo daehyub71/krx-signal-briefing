@@ -1,0 +1,224 @@
+"""그래프 노드.
+
+**노드는 얇다** (SPEC N11). 상태에서 값을 꺼내 도메인 함수를 부르고 결과를 상태에 담는 것까지가
+노드의 일이다. 함수 하나가 20줄을 넘으면 로직이 새어 들어온 것이니 도메인 모듈로 옮긴다.
+
+**I/O 노드는 예외를 밖으로 내지 않는다.** `fetch_one`·`summarize`·`send_email`은 실패를 상태에 적고,
+실패 판정은 `finalize` 한 곳에서만 한다. 그래야 `record_run`에 반드시 도달한다.
+
+M0 단계: 배선을 먼저 세운다. `TODO(M*)`가 붙은 노드는 통과 스텁이다.
+"""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+from langgraph.types import Send
+
+from briefing import store
+from briefing.models import Briefing, RunRecord, SendResult
+from briefing.state import (
+    FAILING_STATUSES,
+    GATE_MISSING,
+    GATE_READY,
+    GATE_STALE,
+    GATE_WAIT_SECONDS,
+    MAX_GATE_ATTEMPTS,
+    STATUS_DART_FAILED,
+    STATUS_DART_PARTIAL,
+    STATUS_GATE_TIMEOUT,
+    STATUS_NO_SIGNALS,
+    STATUS_OK,
+    STATUS_SEND_FAILED,
+    BriefingState,
+    FetchItem,
+    briefing_key,
+)
+
+
+class BriefingRunError(RuntimeError):
+    """배치가 실패했음을 알리는 예외. `finalize`에서만 올린다 (SPEC N5)."""
+
+
+# ── 게이트 (F1) ─────────────────────────────────────────────────
+
+
+def gate(state: BriefingState) -> dict[str, Any]:
+    """오늘 `ksa_runs` 행을 읽어 신호가 저장됐는지 판정한다 (F1).
+
+    이벤트(dispatch)는 "워크플로가 끝났다"만 말한다. "신호가 저장됐다"는 DB가 말한다.
+    """
+    run = store.fetch_today_run(store.conn(), state["run_date"])
+    if run is None:
+        print("[gate] ksa_runs 오늘 행 없음")
+        return {"gate": GATE_MISSING, "data_date": None}
+    data_date, status = run
+    verdict = GATE_STALE if status == "stale_data" else GATE_READY
+    print(f"[gate] 상위 status={status} data_date={data_date} → {verdict}")
+    return {"gate": verdict, "data_date": data_date}
+
+
+def route_gate(state: BriefingState) -> str:
+    """게이트 판정으로 다음 노드를 고른다 — 판정이 그래프 위에 보인다.
+
+    Returns:
+        `ready` / `stale` / `missing`(재시도) / `timeout`(포기 → record_run).
+    """
+    g = state.get("gate", GATE_MISSING)
+    if g == GATE_READY:
+        return "ready"
+    if g == GATE_STALE:
+        return "stale"
+    return "missing" if state.get("attempts", 0) < MAX_GATE_ATTEMPTS else "timeout"
+
+
+def wait(state: BriefingState) -> dict[str, Any]:
+    """상위 배치를 기다린다. 테스트는 이 노드를 반드시 스텁으로 덮는다."""
+    n = state.get("attempts", 0) + 1
+    print(f"[wait] ksa_runs 오늘 행 없음 — {GATE_WAIT_SECONDS}초 대기 ({n}/{MAX_GATE_ATTEMPTS})")
+    time.sleep(GATE_WAIT_SECONDS)
+    return {"attempts": n}
+
+
+# ── 입력 (F2·F3) ────────────────────────────────────────────────
+
+
+def load_signals(state: BriefingState) -> dict[str, Any]:
+    """그날 메일에 실린 신호(`suppressed = false`)와 기존 브리핑을 읽는다.
+
+    TODO(M2): store 실구현.
+    """
+    return {"signals": [], "existing": {}}
+
+
+def load_corps(state: BriefingState) -> dict[str, Any]:
+    """`corpCode.xml` 1회 → {ticker: corp_code}.
+
+    TODO(M2): dart.fetch_corp_codes() + corp.parse().
+    """
+    return {"corp_codes": {}}
+
+
+def fan_out(state: BriefingState) -> list[Send] | str:
+    """종목마다 `fetch_one`을 띄운다. 신호가 없으면 `summarize`로 직행한다.
+
+    빈 Send 목록을 돌려주면 그래프가 거기서 **조용히 끝난다** — 그래서 문자열 경로를 둔다.
+    """
+    signals = state.get("signals", [])
+    if not signals:
+        return "summarize"
+    corps, existing, force = state.get("corp_codes", {}), state.get("existing", {}), state["force"]
+    return [
+        Send(
+            "fetch_one",
+            FetchItem(
+                signal=s,
+                corp_code=corps.get(s.ticker),
+                existing=existing.get(briefing_key(s.strategy, s.ticker)),
+                force=force,
+            ),
+        )
+        for s in signals
+    ]
+
+
+def fetch_one(item: FetchItem) -> dict[str, Any]:
+    """종목 하나 — 공시 조회(F4) → 판정(F5·F6) → Briefing. 실패해도 raise하지 않는다.
+
+    TODO(M1): dart.fetch_disclosures() + flags.classify(). 지금은 `unknown` 스텁.
+    """
+    s = item["signal"]
+    b = Briefing(
+        d=s.d, strategy=s.strategy, ticker=s.ticker, name=s.name,
+        corp_code=item["corp_code"], level="unknown",
+    )
+    return {"briefings": [b], "dart_calls": 0}
+
+
+# ── 요약 · 본문 (F14 · F7·F8) ───────────────────────────────────
+
+
+def summarize(state: BriefingState) -> dict[str, Any]:
+    """Claude 1회 일괄 요약. 예외를 밖으로 내지 않는다 — 실패는 `summary_error`에.
+
+    TODO(M3): summary.build_input() → llm.summarize() → summary.validate().
+    """
+    return {"summaries": {}}
+
+
+def render(state: BriefingState) -> dict[str, Any]:
+    """제목·평문·HTML을 만든다 (순수 함수 호출).
+
+    TODO(M2): render.subject()/text()/html().
+    """
+    return {"subject": "", "text": "", "html": ""}
+
+
+# ── 저장 · 발송 · 기록 (F9 · F10) ───────────────────────────────
+
+
+def persist(state: BriefingState) -> dict[str, Any]:
+    """`ksb_briefings` upsert. dry-run이면 건너뛴다.
+
+    TODO(M2): store.upsert_briefings().
+    """
+    return {}
+
+
+def send_email(state: BriefingState) -> dict[str, Any]:
+    """Gmail SMTP 발송. 예외를 밖으로 내지 않고 `SendResult`를 적는다.
+
+    TODO(M2): notify.send(). dry-run이면 보내지 않는다.
+    """
+    return {"send": SendResult(ok=True, sent_n=0)}
+
+
+def _status_of(state: BriefingState) -> str:
+    """상태로 `ksb_runs.status`를 정한다. 심각한 것부터 본다."""
+    if state.get("gate", GATE_MISSING) == GATE_MISSING:
+        return STATUS_GATE_TIMEOUT
+    send = state.get("send")
+    if send is not None and not send.ok:
+        return STATUS_SEND_FAILED
+    briefings = state.get("briefings", [])
+    errors = sum(1 for b in briefings if b.level == "error")
+    if briefings and errors == len(briefings):
+        return STATUS_DART_FAILED
+    if errors:
+        return STATUS_DART_PARTIAL
+    return STATUS_NO_SIGNALS if not state.get("signals") else STATUS_OK
+
+
+def record_run(state: BriefingState) -> dict[str, Any]:
+    """실행 결과를 `ksb_runs`에 남기고 최종 상태를 정한다. 실패해도 **기록이 먼저**다.
+
+    TODO(M2): store.insert_run(). 지금은 상태 판정까지만.
+    """
+    status = _status_of(state)
+    briefings = state.get("briefings", [])
+    record = RunRecord(
+        data_date=state.get("data_date"),
+        status=status,  # type: ignore[arg-type]
+        signal_n=len(state.get("signals", [])),
+        red_n=sum(1 for b in briefings if b.level == "red"),
+        amber_n=sum(1 for b in briefings if b.level == "amber"),
+        error_n=sum(1 for b in briefings if b.level == "error"),
+        dart_calls=state.get("dart_calls", 0),
+        summary_n=len(state.get("summaries", {})),
+        llm_tokens=state.get("llm_tokens", 0),
+    )
+    print(f"[record_run] status={status} signals={record.signal_n} red={record.red_n}")
+    return {"status": status}
+
+
+def finalize(state: BriefingState) -> dict[str, Any]:
+    """실패 상태면 예외를 올린다 (SPEC N5). **실패 판정 지점은 여기 하나뿐이다.**
+
+    Raises:
+        BriefingRunError: 게이트 타임아웃 · DART 실패 · 발송 실패.
+    """
+    status = state.get("status", STATUS_OK)
+    if status in FAILING_STATUSES:
+        raise BriefingRunError(f"브리핑 실패 ({status})")
+    return {}

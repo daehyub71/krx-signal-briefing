@@ -1,0 +1,50 @@
+digraph arch {
+  graph [fontname="Apple SD Gothic Neo", fontsize=13, rankdir=TB, nodesep=0.35, ranksep=0.55, pad=0.4, bgcolor="white", compound=true,
+         label="krx-signal-briefing — 시스템 개요 (PLAN §1 · SPEC §3)", labelloc=t, labeljust=l];
+  node  [fontname="Apple SD Gothic Neo", fontsize=12, shape=box, style="rounded,filled", fillcolor="#F4F6FA", color="#3D465F", penwidth=1.2, margin="0.18,0.1"];
+  edge  [fontname="Apple SD Gothic Neo", fontsize=10, color="#3D465F", arrowsize=0.8];
+
+  subgraph cluster_up {
+    label=<<b>krx-signal-alerts</b>  (상위)<br/><font point-size="10">평일 08:20 KST · alert.yml · 마지막 단계에 dispatch만 추가</font>>; style="rounded,filled"; fillcolor="#FAFBFD"; color="#C5CAD6";
+    ksc   [label=<ksc_bars · ksc_tickers<br/><font point-size="10">시세 (krx-stock-charts 소유)</font>>, fillcolor="#EEF0F5"];
+    alert [label=<스크리닝 배치<br/><font point-size="10">전략 5개 · LangGraph · LLM 없음</font>>];
+    mail1 [label=<📧 신호 메일 (1통째)<br/><font point-size="10">전 신호 + 조건 근거값</font>>, fillcolor="#FFFFFF"];
+    kakao [label=<💬 카카오톡<br/><font point-size="10">상위 10건</font>>, fillcolor="#FFFFFF"];
+    ksc -> alert [label=" SELECT"];
+    dispatch [label=<repository_dispatch<br/><font point-size="10">alert-completed · if: always()<br/>PAT: 대상 리포 1개 · Contents write</font>>, fillcolor="#FFF4E0", color="#E0B458"];
+    alert -> mail1; alert -> kakao; alert -> dispatch [label=" 마지막 단계"];
+  }
+
+  subgraph cluster_db {
+    label=<<b>Supabase</b>  (같은 프로젝트 · 접두어로 소유 구분)>; style="rounded,filled"; fillcolor="#FAFBFD"; color="#C5CAD6";
+    ksa [label=<<b>ksa_signals · ksa_runs</b><br/><font point-size="10">상위 소유 · 여기서는 SELECT만</font>>, fillcolor="#EEF0F5"];
+    { rank=same; ksa; ksb; }
+    ksb [label=<<b>ksb_briefings · ksb_runs</b><br/><font point-size="10">이 프로젝트 소유 · RLS 읽기 공개 / 쓰기 service_role</font>>, fillcolor="#EAF7EC"];
+  }
+
+  subgraph cluster_me {
+    label=<<b>krx-signal-briefing</b>  (이 프로젝트)<br/><font point-size="10">briefing.yml · LangGraph · 주 진입: dispatch 이벤트 / 예비: cron 09:05</font>>; style="rounded,filled"; fillcolor="#FFFBF2"; color="#E0B458";
+    gate  [label=<① 게이트<br/><font point-size="10">ksa_runs 오늘 행? 없으면 1분×10회</font>>, fillcolor="#FFF4E0"];
+    fetch [label=<② 공시 조회·판정<br/><font point-size="10">종목당 list.json 1회 → 🔴/🟡 규칙표</font>>, fillcolor="#FFF4E0"];
+    summ  [label=<③ 요약<br/><font point-size="10">Claude Opus 5 · 하루 1회 일괄<br/>실패해도 메일은 간다</font>>, fillcolor="#E8F0FB"];
+    mail2 [label=<📧 브리핑 메일 (2통째)<br/><font point-size="10">조건 5줄 + 등급 · 공시 · 원문 링크 · 요약</font>>, fillcolor="#FFFFFF"];
+    gate -> fetch -> summ -> mail2;
+    { rank=same; gate; fetch; summ; mail2; }
+  }
+
+  subgraph cluster_ext {
+    label=<<b>외부 API</b>>; style="rounded,filled"; fillcolor="#FAFBFD"; color="#C5CAD6";
+    dart [label=<OpenDART<br/><font point-size="10">corpCode.xml 1회 + list.json ×N<br/>하루 약 16회 / 한도 20,000</font>>];
+    { rank=same; dart; claude; }
+    claude [label=<Anthropic API<br/><font point-size="10">claude-opus-5 · 공식 SDK</font>>];
+  }
+
+  alert -> ksa [label=" upsert · run 기록", color="#626D8A"];
+  ksa -> gate  [label=" SELECT (게이트·신호·evidence)", color="#1F63A8", fontcolor="#1F63A8"];
+  dispatch -> gate [label=" 이벤트 → 수십 초 안에 시작", color="#C9283E", fontcolor="#C9283E", penwidth=1.6];
+  fetch -> dart [dir=both, label=" HTTPS", style=dashed];
+  summ -> claude [dir=both, label=" HTTPS", style=dashed];
+  summ -> ksb  [label=" upsert (멱등)", color="#2E7D32", fontcolor="#2E7D32"];
+  mail2 -> ksb [style=invis];
+
+}
