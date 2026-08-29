@@ -32,6 +32,7 @@ def test_run_detail_counts_sources_and_skips() -> None:
         "source": {"mcp": 2, "rest": 1, "none": 1},
         "skipped": {"anomaly": 2, "insider": 1},
         "anomaly_verdicts": {},
+        "news": {"with": 0, "none_level": 3},
     }
 
 
@@ -42,3 +43,88 @@ def test_run_detail_tallies_anomaly_verdicts() -> None:
         briefing(anomaly=Anomaly(score=1, verdict="clean")),
     ]
     assert enrich.run_detail(bs)["anomaly_verdicts"] == {"clean": 2, "warning": 1}
+
+
+# ── ④ 뉴스 — 등급 none인 종목만 (F11·D13 ④) ─────────────────────
+
+import pytest  # noqa: E402
+
+from briefing import dart, dart_mcp, mcpc, news_mcp  # noqa: E402
+from briefing.models import Disclosure, NewsItem  # noqa: E402
+
+SIG = SignalRow(d=D, strategy="mtf", ticker="079940", name="가비아")
+QUARTERLY = Disclosure(rcept_dt=D, report_nm="분기보고서 (2026.03)", rcept_no="1", flr_nm="가비아")
+CB = Disclosure(
+    rcept_dt=D, report_nm="주요사항보고서(전환사채권발행결정)", rcept_no="2", flr_nm="가비아"
+)
+NEWS = [
+    NewsItem(title="맥쿼리 공개매수 중인 가비아", link="https://n.news.naver.com/x", published=D)
+]
+
+
+class Spy:
+    def __init__(self, result: object) -> None:
+        self.result = result
+        self.calls: list[tuple[object, ...]] = []
+
+    def __call__(self, *args: object, **kw: object) -> object:
+        self.calls.append(args)
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+@pytest.fixture
+def sources(monkeypatch: pytest.MonkeyPatch) -> dict[str, Spy]:
+    spies = {
+        "mcp": Spy([QUARTERLY]),  # 기본: 공시는 있으나 아무것도 안 걸림 → none
+        "anomaly": Spy(None),
+        "insider": Spy(None),
+        "news": Spy(NEWS),
+    }
+    monkeypatch.setattr(dart_mcp, "fetch_disclosures", spies["mcp"])
+    monkeypatch.setattr(dart_mcp, "fetch_anomaly", spies["anomaly"])
+    monkeypatch.setattr(dart_mcp, "fetch_insider", spies["insider"])
+    monkeypatch.setattr(news_mcp, "fetch_news", spies["news"])
+    monkeypatch.setattr(dart, "fetch_disclosures", Spy([]))
+    return spies
+
+
+def test_news_fetched_only_for_none_level(sources: dict[str, Spy]) -> None:
+    """공시로 설명되지 않는 종목만 — 등급 none일 때만 부른다 (D13 ④)."""
+    b = enrich.briefing_for(SIG, "00506294", D, D)
+    assert b.level == "none" and b.news == tuple(NEWS)
+    assert sources["news"].calls == [("가비아",)]
+
+
+def test_news_skipped_when_flagged(sources: dict[str, Spy]) -> None:
+    """🔴/🟡면 공시가 이미 설명한다 — 뉴스를 부르지 않는다."""
+    sources["mcp"].result = [CB]
+    b = enrich.briefing_for(SIG, "00506294", D, D)
+    assert b.level == "red" and b.news == ()
+    assert sources["news"].calls == []
+
+
+def test_news_failure_is_skipped_not_fatal(sources: dict[str, Spy]) -> None:
+    """뉴스는 있으면 좋은 층 — 실패하면 생략 표기만 남기고 메일은 간다."""
+    sources["news"].result = mcpc.McpStartError("[naver] 환경변수 없음")
+    b = enrich.briefing_for(SIG, "00506294", D, D)
+    assert b.level == "none" and b.news == () and "news" in b.skipped
+
+
+def test_news_empty_result_is_not_a_skip(sources: dict[str, Spy]) -> None:
+    """검색 결과가 0건인 것과 층이 죽은 것은 다르다."""
+    sources["news"].result = []
+    b = enrich.briefing_for(SIG, "00506294", D, D)
+    assert b.news == () and "news" not in b.skipped
+
+
+def test_run_detail_counts_news() -> None:
+    bs = [
+        briefing(level="none", news=(NEWS[0],)),
+        briefing(level="none", skipped=("news",)),
+        briefing(level="red"),
+    ]
+    detail = enrich.run_detail(bs)
+    assert detail["news"] == {"with": 1, "none_level": 2}
+    assert detail["skipped"]["news"] == 1

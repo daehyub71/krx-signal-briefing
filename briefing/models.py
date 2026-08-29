@@ -169,6 +169,28 @@ class Insider:
 
 
 @dataclass(frozen=True, slots=True)
+class NewsItem:
+    """뉴스 한 건 (F11). 제목·언론사 링크·날짜만 — 본문은 담지 않는다.
+
+    제목은 정제된 상태로 들어온다 (`news_mcp.clean_text` — `<b>` 태그·HTML 엔티티 제거).
+    """
+
+    title: str
+    link: str  # 네이버 뉴스 링크
+    origin: str = ""  # 원문(언론사) 링크
+    published: date | None = None
+
+    def to_json(self) -> dict[str, Any]:
+        """jsonb에 넣을 형태."""
+        return {
+            "title": self.title,
+            "link": self.link,
+            "origin": self.origin,
+            "published": self.published.isoformat() if self.published else None,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class Flow:
     """korea-stock-mcp `get_stock_trade_info` — 시세 참고 (F12·D14). 순매수는 없다."""
 
@@ -238,6 +260,7 @@ class Briefing:
     anomaly: Anomaly | None = None  # F4b 보조 신호 (v2.0). None = 생략됨
     insider: Insider | None = None  # F4b 보조 신호 (v2.0). None = 생략됨
     flow: Flow | None = None  # F12 시세 참고 (v2.0). None = 생략됨
+    news: tuple[NewsItem, ...] = ()  # F11 뉴스 (등급 none인 종목만). 빈 튜플 = 없음·생략
     # 아래 셋은 열이 아니다 — 렌더 표기와 ksb_runs.detail 집계에 쓴다
     source: str = "mcp"  # 공시 출처: 'mcp' | 'rest'(폴백, D15)
     skipped: tuple[str, ...] = ()  # 생략된 보조 신호 이름 ('anomaly' · 'insider' · 'flow')
@@ -255,6 +278,7 @@ class Briefing:
         anomaly: Anomaly | None = None,
         insider: Insider | None = None,
         flow: Flow | None = None,
+        news: tuple[NewsItem, ...] = (),
         source: str = "mcp",
         skipped: tuple[str, ...] = (),
         error: str = "",
@@ -272,6 +296,7 @@ class Briefing:
             anomaly=anomaly,
             insider=insider,
             flow=flow,
+            news=news,
             source=source,
             skipped=skipped,
             error=error,
@@ -297,6 +322,7 @@ class Briefing:
             "anomaly": self.anomaly.to_json() if self.anomaly else None,
             "insider": self.insider.to_json() if self.insider else None,
             "flow": self.flow.to_json() if self.flow else None,
+            "news": [n.to_json() for n in self.news] if self.news else None,
         }
 
 

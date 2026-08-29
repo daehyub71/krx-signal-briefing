@@ -95,6 +95,7 @@ def test_briefing_to_row_matches_schema_columns() -> None:
         "anomaly",
         "insider",
         "flow",
+        "news",
     }
     assert row["d"] == "2026-08-25"
     assert row["level"] == "red"

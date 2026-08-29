@@ -52,7 +52,7 @@ def test_gate_missing_when_no_row(no_db: None, monkeypatch: pytest.MonkeyPatch) 
 from datetime import timedelta  # noqa: E402
 from typing import cast  # noqa: E402
 
-from briefing import dart, dart_mcp, mcpc  # noqa: E402
+from briefing import dart, dart_mcp, mcpc, news_mcp  # noqa: E402
 from briefing.models import Anomaly, Briefing, Disclosure, Insider, SignalRow  # noqa: E402
 from briefing.state import FetchItem  # noqa: E402
 
@@ -106,11 +106,13 @@ def sources(monkeypatch: pytest.MonkeyPatch) -> dict[str, Spy]:
         "rest": Spy([QUARTERLY]),
         "anomaly": Spy(ANOMALY),
         "insider": Spy(Insider(signal="none")),
+        "news": Spy([]),  # 등급 none이면 뉴스도 부른다 (F11) — 기본은 0건
     }
     monkeypatch.setattr(dart_mcp, "fetch_disclosures", spies["mcp"])
     monkeypatch.setattr(dart, "fetch_disclosures", spies["rest"])
     monkeypatch.setattr(dart_mcp, "fetch_anomaly", spies["anomaly"])
     monkeypatch.setattr(dart_mcp, "fetch_insider", spies["insider"])
+    monkeypatch.setattr(news_mcp, "fetch_news", spies["news"])
     return spies
 
 
@@ -157,7 +159,7 @@ def test_fetch_one_falls_back_to_rest_when_mcp_fails(sources: dict[str, Spy]) ->
     assert sources["rest"].calls == [("00506294", RUN_DATE - timedelta(days=30), RUN_DATE)]
     assert b.source == "rest" and b.level == "none"  # REST 결과(분기보고서만)로 판정
     assert b.anomaly is None and b.insider is None
-    assert b.skipped == ("anomaly", "insider")
+    assert b.skipped == ("anomaly", "insider")  # 뉴스는 살아 있어 생략되지 않는다
     assert out["dart_calls"] == 1
 
 
