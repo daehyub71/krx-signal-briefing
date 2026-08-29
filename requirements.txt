@@ -1,5 +1,7 @@
 langgraph>=1.2,<2
 anthropic>=0.40
+# MCP 파이썬 SDK — 남이 만든 MCP 서버(korean-dart-mcp 등)를 stdio 클라이언트로 부른다 (SPEC D12·N14). 2026-08-29 사용자 확인
+mcp>=2.1,<3
 supabase>=2.31,<3
 # ksa_* 조회·ksb_* 쓰기는 REST로도 되지만, 드라이런의 이력 조회는 1000행 절단을 피해 직접 SQL로 한다 — 런타임 의존성이다.
 psycopg[binary]>=3.2

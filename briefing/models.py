@@ -91,6 +91,23 @@ class Disclosure:
     flr_nm: str = ""
     corrected: bool = False  # `[정정]`·`[기재정정]` 접두가 있었는가
 
+    @classmethod
+    def from_dart_item(cls, item: dict[str, Any]) -> Disclosure:
+        """OpenDART `list.json` 항목 → Disclosure.
+
+        REST(`dart.py`)와 MCP(`dart_mcp.py`)가 **같은 매핑**을 쓴다.
+
+        Args:
+            item: `rcept_dt`(YYYYMMDD) · `report_nm` · `rcept_no` · `flr_nm` 키를 가진 사전.
+        """
+        raw = str(item["rcept_dt"]).replace("-", "")
+        return cls(
+            rcept_dt=date(int(raw[:4]), int(raw[4:6]), int(raw[6:8])),
+            report_nm=str(item.get("report_nm", "")).strip(),
+            rcept_no=str(item["rcept_no"]),
+            flr_nm=str(item.get("flr_nm", "")).strip(),
+        )
+
     def to_json(self) -> dict[str, Any]:
         """jsonb에 넣을 형태. date는 ISO 문자열로 — supabase-py가 date를 직렬화하지 못한다."""
         return {
@@ -99,6 +116,85 @@ class Disclosure:
             "rcept_no": self.rcept_no,
             "flr_nm": self.flr_nm,
             "corrected": self.corrected,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class Anomaly:
+    """korean-dart-mcp `disclosure_anomaly` — 보조 신호 (F4b). **등급을 바꾸지 않는다.**"""
+
+    score: int  # 0~100
+    verdict: str  # clean / watch / warning / red_flag
+    summary: str = ""
+    flags: tuple[str, ...] = ()
+
+    def to_json(self) -> dict[str, Any]:
+        """jsonb에 넣을 형태."""
+        return {
+            "score": self.score,
+            "verdict": self.verdict,
+            "summary": self.summary,
+            "flags": list(self.flags),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class Insider:
+    """korean-dart-mcp `insider_signal` — 임원·주요주주 매매 군집 (F4b)."""
+
+    signal: str  # strong_sell_cluster / sell_cluster / buy_cluster / none …
+    buy_events: int = 0
+    sell_events: int = 0
+    unique_buyers: int = 0
+    unique_sellers: int = 0
+    net_change_shares: int = 0
+    summary: str = ""
+
+    @property
+    def sell_cluster(self) -> bool:
+        """매도 군집인가 — 🟡 `insider_sell_cluster` 규칙의 입력."""
+        return "sell_cluster" in self.signal
+
+    def to_json(self) -> dict[str, Any]:
+        """jsonb에 넣을 형태."""
+        return {
+            "signal": self.signal,
+            "buy_events": self.buy_events,
+            "sell_events": self.sell_events,
+            "unique_buyers": self.unique_buyers,
+            "unique_sellers": self.unique_sellers,
+            "net_change_shares": self.net_change_shares,
+            "summary": self.summary,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class Flow:
+    """korea-stock-mcp `get_stock_trade_info` — 시세 참고 (F12·D14). 순매수는 없다."""
+
+    bas_dd: str  # 마지막 거래일 YYYYMMDD
+    close: int
+    mktcap: int  # 시가총액(원)
+    list_shrs: int  # 상장주식수
+    trdval_5d: int  # 최근 ≤5거래일 거래대금 합(원)
+    days: int  # 합산에 든 거래일 수
+
+    def display(self) -> str:
+        """본문 한 줄 — 사실만. 억 단위 반올림."""
+        eok = 100_000_000
+        md = f"{self.bas_dd[4:6]}/{self.bas_dd[6:8]}"
+        cap, val = self.mktcap // eok, self.trdval_5d // eok
+        return f"시총 {cap:,}억 · {self.days}일 거래대금 {val:,}억 ({md})"
+
+    def to_json(self) -> dict[str, Any]:
+        """jsonb에 넣을 형태."""
+        return {
+            "bas_dd": self.bas_dd,
+            "close": self.close,
+            "mktcap": self.mktcap,
+            "list_shrs": self.list_shrs,
+            "trdval_5d": self.trdval_5d,
+            "days": self.days,
         }
 
 
@@ -139,7 +235,13 @@ class Briefing:
     disclosures: tuple[Disclosure, ...] = ()
     window_days: int = WINDOW_DAYS
     summary: str | None = None
-    error: str = ""  # level == 'error'일 때 원인. 열이 아니라 ksb_runs.detail로 간다
+    anomaly: Anomaly | None = None  # F4b 보조 신호 (v2.0). None = 생략됨
+    insider: Insider | None = None  # F4b 보조 신호 (v2.0). None = 생략됨
+    flow: Flow | None = None  # F12 시세 참고 (v2.0). None = 생략됨
+    # 아래 셋은 열이 아니다 — 렌더 표기와 ksb_runs.detail 집계에 쓴다
+    source: str = "mcp"  # 공시 출처: 'mcp' | 'rest'(폴백, D15)
+    skipped: tuple[str, ...] = ()  # 생략된 보조 신호 이름 ('anomaly' · 'insider' · 'flow')
+    error: str = ""  # level == 'error'일 때 원인
 
     @classmethod
     def from_signal(
@@ -150,6 +252,11 @@ class Briefing:
         *,
         flags: tuple[Flag, ...] = (),
         disclosures: tuple[Disclosure, ...] = (),
+        anomaly: Anomaly | None = None,
+        insider: Insider | None = None,
+        flow: Flow | None = None,
+        source: str = "mcp",
+        skipped: tuple[str, ...] = (),
         error: str = "",
     ) -> Briefing:
         """신호 행에서 브리핑을 만든다 — 키·이름은 신호에서 그대로 온다."""
@@ -162,6 +269,11 @@ class Briefing:
             level=level,
             flags=flags,
             disclosures=disclosures,
+            anomaly=anomaly,
+            insider=insider,
+            flow=flow,
+            source=source,
+            skipped=skipped,
             error=error,
         )
 
@@ -182,6 +294,9 @@ class Briefing:
             "disclosures": [x.to_json() for x in self.disclosures],
             "window_days": self.window_days,
             "summary": self.summary,
+            "anomaly": self.anomaly.to_json() if self.anomaly else None,
+            "insider": self.insider.to_json() if self.insider else None,
+            "flow": self.flow.to_json() if self.flow else None,
         }
 
 

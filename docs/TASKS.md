@@ -12,13 +12,13 @@
 |----------|------|---|--------|------|
 | M0 뼈대 + 걷는 해골 | `██████████` | 100% | 12/12 | ✅ 2026-08-26 |
 | M1 DART 계층 ★ TDD | `█████████░` | 90% | 9/10 | 🔄 🔴 손검증 대기 |
-| **M1b MCP 계층** (v2.0) | `░░░░░░░░░░` | 0% | 0/10 | 🔜 D12·D13·D15 확정 대기 |
+| **M1b MCP 계층** (v2.0) | `██████████` | 100% | 10/10 | ✅ 2026-08-29 |
 | **M1c 뉴스** (v2.0) | `░░░░░░░░░░` | 0% | 0/5 | 🔜 |
 | M2 본문·저장·발송 | `░░░░░░░░░░` | 0% | 0/9 | 🔜 |
 | M3 Claude 요약 | `░░░░░░░░░░` | 0% | 0/8 | 🔜 |
 | M4 자동화·배포 | `░░░░░░░░░░` | 0% | 0/11 | 🔜 |
 | M5 마무리 | `░░░░░░░░░░` | 0% | 0/5 | 🔜 |
-| **전체** | `███░░░░░░░` | **30%** | **21/70** | 🔄 M1 |
+| **전체** | `████░░░░░░` | **44%** | **31/70** | 🔄 M1 마감 대기 · M1c |
 
 범례: 🔜 대기 · 🔄 진행중 · ✅완료일
 
@@ -30,7 +30,7 @@
 | M0 전 | 깃허브 리포 `krx-signal-briefing` 생성 (public) | ✅ 2026-08-26 첫 푸시 |
 | M3 전 | Anthropic API 키 → `.env` `ANTHROPIC_API_KEY` | ✅ 2026-08-26 연결 확인 |
 | **M1b 전** | **D12·D13·D15 확정** (SPEC §2-3). D14는 ✅ 포함 확정(2026-08-29) | ⏳ |
-| **M1b 전** | **KRX OPEN API 키** (`KRX_API_KEY`, data.krx.co.kr 등록·승인 ~1일) — korea-stock-mcp용 | ⏳ |
+| ~~M1b/M4~~ | ~~KRX OPEN API 키~~ — **불필요해짐** (D14 v2: 상위가 기존 `KRX_ID`/`KRX_PW`로 수집) | ✅ 해소 |
 | **M1c 전** | **네이버 NCP API HUB 키** (`NCP_APIGW_API_KEY_ID` / `NCP_APIGW_API_KEY`) | ⏳ |
 | M4 | fine-grained PAT (대상 `krx-signal-briefing` 1개 · Contents write · 1년) → 상위 리포 Secrets `BRIEFING_DISPATCH_TOKEN` | ⏳ |
 | M4 | 이 리포 Secrets 8종 등록 | ⏳ |
@@ -94,18 +94,20 @@
 
 > **MCP 서버는 데이터 소스다** (N14). 도구 순서는 코드가 정하고 LLM에는 도구를 주지 않는다. 응답은 표본 JSON으로 mock, 실제 Node 기동은 CI 통합에서만.
 
-- [ ] `requirements.txt`에 `mcp` 추가(사용자 확인 후) · 로컬 `npx -y korean-dart-mcp@<ver>` 기동 확인 · 버전 고정값 결정
-- [ ] `briefing/mcpc.py` — stdio 세션 1회 · `call(tool, args, timeout=30)` · 스레드 락 · 실패 예외 · **stdout 오염 시 실패 격리**(R18)
-- [ ] `tests/fixtures/mcp_search_disclosures.json` · `mcp_anomaly.json` · `mcp_insider.json` — 실제 응답 표본 수집
-- [ ] `briefing/dart_mcp.py` — 응답 → `Disclosure` / `{score, verdict}` / 군집 종류. 계약 테스트 · **REST(`dart.py`)와 같은 종목·같은 창의 공시 목록이 일치**하는 테스트
-- [ ] `flags.py` — 🟡 `insider_sell_cluster` 규칙 + SAMPLES
-- [ ] `schema.sql` — `ksb_briefings.anomaly jsonb` 추가(`alter table … add column if not exists`) · `Briefing.anomaly` · `to_row()`
-- [ ] `fetch_one` 재구성 — MCP 공시 → 폴백 → 판정 → 보조 신호 생략 표기 · 20줄 유지 · 테스트(폴백 경로 · 보조 실패 경로)
-- [ ] `tests/fixtures/mcp_stock_trade.json` 표본 · `briefing/stock_mcp.py` — korea-stock-mcp `get_stock_trade_info` → `{mktcap, list_shrs, trdval_5d}` · 응답에 시총·상장주식수가 있는지 **실표본으로 확인**(없으면 SPEC F12 수정) · 계약 테스트
-- [ ] `fetch_one` ③에 시세 참고 추가 · `ksb_briefings.flow` 저장 · 키 없음·실패 시 생략 + `⚠ 시세 참고 생략` 테스트
-- [ ] CI `setup-node`(20.19) + npm·`~/.korean-dart-mcp` 캐시 · **MCP 3종 기동 시간 측정** · 드라이런 MCP 경로 vs REST 경로 대조 → 「측정 기록」
+- [x] `requirements.txt`에 `mcp>=2.1,<3` 추가(사용자 확인 2026-08-29) · 로컬 stdio 기동 확인 3종 · **버전 고정: korean-dart-mcp@0.10.1 · @isnow890/naver-search-mcp@1.0.50 · korea-stock-mcp@1.4.1** (아래 「측정 기록」)
+- [x] `briefing/mcpc.py` — 서버별 전용 루프 스레드 위 stdio 세션 1회 · 동기 `call()`/`call_json()` · 스레드 락 · 예외 4종(`Start`·`Call`·`Protocol`·`Unavailable`) · **세션 파손 시 죽음 표시 + 이후 즉시 실패**(R18) · 필수 키 없으면 띄우지 않음 · 서버에 필요한 키만 전달 · 레지스트리(`get`·`close_all`, 실패 캐시) · 실서버 통합 확인 — 테스트 17개
+- [x] `tests/fixtures/mcp_search_disclosures.json` · `mcp_anomaly.json` · `mcp_insider.json` · `mcp_stock_corp_code.json` · `mcp_stock_error_nokey.txt` — 실제 응답 표본 수집 (삼성전자). naver·KRX 표본은 키 발급 후
+- [x] `briefing/dart_mcp.py` — `parse_*`(순수) + `fetch_disclosures`/`fetch_anomaly`/`fetch_insider` · `Disclosure.from_dart_item`을 REST·MCP 공통 매핑으로 · 인자 고정 `all_pages+include_corrections`(REST와 61=61 실측) · `Anomaly`·`Insider` 모델 · 계약 테스트 16개 + **실서버 MCP≡REST 통합 테스트**(`MCP_INTEGRATION=1`, 통과)
+- [x] `flags.py` — 🟡 `insider_sell_cluster`: 제목 규칙이 아니라 `Insider.sell_cluster` 입력으로 붙는 플래그(`insider_flag`, `classify(insider=…)`) · 근거(매도 건수·인원·순변동주식)를 `report_nm`에 · `INSIDER_SAMPLES` 5종(sell/strong_sell → 🟡, buy/strong_buy/none → 없음) · 🔴를 내리지 않음 — 테스트 9개
+- [x] `schema.sql` — `ksb_briefings.anomaly jsonb` + **`insider jsonb`**(매도 군집 근거 렌더용) `alter table … add column if not exists` · 실DB 적용·열 확인 · `Briefing.anomaly`/`insider` · `to_row()`(없으면 null = '못 봄') — 테스트 3개
+- [x] `fetch_one` 재구성 — `enrich.briefing_for()`(MCP 공시 → REST 폴백 → 판정 → 보조 신호 개별 생략) 호출로 **12줄** · `Briefing.source`/`skipped`(열 아님, 렌더·detail용) · `enrich.run_detail()` 집계 · 테스트 12개(폴백 경로 · 둘 다 실패 → error · anomaly만 실패 · insider 🟡 승격)
+- [x] ~~`stock_mcp.py`~~ → **`store.fetch_flows()`로 대체** (D14 v2, 2026-08-29): 상위 `krx-stock-charts`에 **SPEC F8 신설**(pykrx `get_market_cap_by_ticker` 1회 → `ksc_tickers.mktcap`·`list_shrs`·`mktcap_d`, 실DB 2,767종목 수집 완료) → 우리는 `ksc_bars.a` 5일 합과 함께 **SQL 한 번**으로 읽는다. **KRX OPEN API 키·korea-stock-mcp 불필요.** 상위 테스트 129개 통과
+- [x] `load_market` 노드(**배치 1회 SQL**) → `fan_out`이 `FetchItem.flow`로 분배 → `fetch_one` ③ 부착 · `ksb_briefings.flow` 저장 · 조회 실패·상위 미수집 시 전 종목 `skipped += flow`(`⚠ 시세 참고 생략`) · 종목만 없는 경우와 구분 · 테스트 8개 · `GRAPH.md` 재생성 · 실DB 확인(삼성전자 15,551,101억 · 가비아 6,113억)
+- [x] CI `setup-node`(20.19) + `~/.npm/_npx`·`~/.korean-dart-mcp` 캐시 · **`mcp` 잡 신설**(`scripts/mcp_probe.py --require dart` — 공시 서버는 필수, 키 없는 서버는 건너뜀, 포크 PR은 스킵) · `dryrun.py --source mcp|rest|both`로 **경로 대조** · 기동 시간 「측정 기록」
 
-**완료 기준**: MCP·REST 공시 목록 일치 · 서버를 죽여도 폴백으로 완주 · CI 기동 < 60초
+**완료 기준 — 충족 (2026-08-29)**
+- MCP·REST 공시 목록 일치 (통합 테스트 `MCP_INTEGRATION=1`) · 폴백 경로 테스트 · 로컬 웜 기동 1.0초
+- ⏳ CI 기동 시간은 첫 푸시 후 확인 (콜드 10.9초 실측 · 캐시 적용 시 단축 예상)
 
 ---
 
@@ -194,6 +196,12 @@
 | M1 표본 — 접두 분포 | `[기재정정]` 432 · `[첨부정정]` 25 · `[발행조건확정]` 6 · `[첨부추가]` 5 · `[정정제출요구]` 2 | 2026-08-29 |
 | M1 표본 — 120일 창에서 100건 초과 종목 | 1개(corp 00162461, 186건) — 30일 창에서는 재확인 | 2026-08-29 |
 | M1 드라이런 (2026-08-29) — 최근 90일 신호 **165건 · 9거래일 · 하루 18.3건** · 153종목 · DART 154회 · 020 **0회** | 🔴 13 (8%) · 🟡 13 (8%) · none 139 (84%) · unknown **0** · error 0. 전략별: VCP 97(🔴9·🟡9) · MTF 66(🔴3·🟡4) · 눌림목 2(🔴1). 규칙별 플래그: cb 10 · rights_issue 8 · treasury_sale 7 · lawsuit 6 · controller_change 4 · admin_warning 2 · rights_issue(자회사) 2. 하루 예상 호출 ≈ 19회 | 2026-08-29 |
+| M1b MCP 기동 (2026-08-29, 로컬 Node 22 · mcp 2.1.1) | korean-dart-mcp@0.10.1 **콜드 10.9초 / 웜 0.6초**, 도구 18 · korea-stock-mcp@1.4.1 1.4 / 0.5초, 도구 8 · naver-search-mcp@1.0.50 **키 없으면 기동 거부**. 도구 호출: search_disclosures 0.1초(페이지 20건 → `all_pages` 필요) · disclosure_anomaly 2.3초 · insider_signal 0.4초 | 2026-08-29 |
+| M1b 시세 경로 전환 (2026-08-29) | 세 경로 비교 후 **상위 DB 경유 채택**: ① pykrx 직접(키 불필요·호출 1회·의존성 +pykrx) ② **상위 수집 → 우리는 SQL**(채택) ③ korea-stock-mcp(KRX OPEN API 키 필요·≤18회). 상위 `update --update`에 pykrx 1회가 늘고, 우리 쪽 외부 호출은 0회가 됐다. 실측: 상위 2,767/2,769종목 수집, `ksc_tickers.mktcap` null 2종목 | 2026-08-29 |
+| M1b dart_mcp ≡ REST (2026-08-29) | `search_disclosures` 인자별: all_pages만 53 · **all_pages+include_corrections 61** · page size=100 61 · days=30+all_pages 53 — REST 61과 일치하는 조합으로 고정. 실서버 통합 테스트 통과(집합·정렬 동일) | 2026-08-29 |
+| M1b 경로 대조 (2026-08-29) | `dryrun.py --source both` 8종목 — **MCP ≡ REST 불일치 0건**. DART 호출 17회(양쪽 각 8 + corpCode 1) | 2026-08-29 |
+| M1b MCP 기동 (로컬 웜, 2026-08-29) | korean-dart-mcp **1.0초**(18도구) · korea-stock-mcp 0.8초(배치 제외) · naver 키 없어 건너뜀 · 총 4.9초. 도구 호출: search_disclosures 0.1초 · disclosure_anomaly 2.2초 · insider_signal 0.4초 | 2026-08-29 |
+| M1b mcpc 실서버 통합 (2026-08-29) | dart 웜 기동 1.0초 · 스레드 4개 동시 호출 직렬화 정상 · naver 키 없음 → `McpStartError`로 띄우지 않음 · stock `get_corp_code` OK, `get_stock_trade_info`는 KRX 키 없음 `McpCallError`. **`search_disclosures(all_pages=true)`는 mode=batch, 삼성전자 30일 53건 — 페이지 모드 total_count 61과 다르다(정정 포함 여부 추정) → `dart_mcp.py`에서 `include_corrections`로 REST 61건과 일치시킬 것** | 2026-08-29 |
 | M1 드라이런 — 눈에 띈 것 | ① 같은 CB 결정이 원문 + `[기재정정]` ×2로 3~4줄 (엔투텍·빛과전자) → M2 렌더에서 정정 묶음 표시 검토 ② 최대주주변경은 `최대주주변경` + `…변동신고서(최대주주변경시)` 두 제목이 짝으로 옴 (한화갤러리아·SK이터닉스) | 2026-08-29 |
 | M1 — 하루 DART 호출 수 · `020` 발생 여부 | — | |
 | M1 — 규칙표 변경 내역(추가·삭제 키워드) | — | |
@@ -211,6 +219,9 @@
 |---|------|------|------|
 | 2 | `corpCode.xml`이 175바이트, `BadZipFile` (2026-08-29 토 10:39) | **DART 시스템 점검** — HTTP 200으로 `<status>800</status>` XML을 준다. zip이 아니다 | `dart.py`는 `PK` 매직 바이트/`<status>`로 오류 본문을 먼저 가려낸다. 응답 원문을 `tests/fixtures/corpcode_error_800.xml`로 보관. 토요일 오전 점검이라 평일 08:45 실행과는 무관해 보이나, 평일 점검 여부는 미해소 이슈 ⑥ |
 | 1 | 08/25 신호 44건인데 `sent_email=true`가 0건 (2026-08-26 연결 테스트) | 상위 배치가 `sent_email` 열을 저장하지 않는다 — 카카오 상위 10건만 `sent_kakao=true`. 메일 발송 집합은 `suppressed=false` 전체(15건 = `ksa_runs.sent_email_n`) | SPEC F2를 `suppressed = false`로 변경(v1.1.1). 코드에서 `sent_email`을 쓰지 않는다 |
+
+| 3 | MCP 프로브가 `tool.inputSchema`·`result.isError`에서 `AttributeError` (2026-08-29) | **MCP 파이썬 SDK 2.x는 snake_case** (`input_schema`·`is_error`). 1.x 문서·예제와 다르다 | 2.x 필드명 사용. `mcpc.py`에 계약 테스트로 고정 |
+| 4 | korea-stock-mcp `get_stock_trade_info` 인자 오류 | README는 `isuSrtCd/fromDate/toDate`인데 실제 스키마는 `basDdList/market/codeList` | 실스키마 기준. `mcpc.list_tools()`로 기동 시 스키마를 확인해 로그 |
 
 ### 미리 알고 있는 함정 (상위·선행 프로젝트에서 확인됨)
 

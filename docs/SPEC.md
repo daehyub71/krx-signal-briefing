@@ -79,8 +79,19 @@
 |----|------|------|------|------|
 | **D12** | MCP 클라이언트 방식 | 추천 | **MCP 파이썬 SDK(`mcp` 2.x) stdio 클라이언트** — 우리 코드가 도구를 **정해진 순서로** 부른다. 에이전트 루프 없음, LLM은 요약(F14)만 | 아이디어 §5·§6. 무엇을 부를지 이미 안다. Claude Agent SDK/에이전트 루프는 비용 20~50배 + 비결정적. MCP 서버는 **데이터 소스**이지 판단 주체가 아니다 (N14) |
 | **D13** | 도구 배치 | 추천 | ① 공시: `search_disclosures(corp_code, days=30)` → **우리 규칙표(F5)로 판정** ② `disclosure_anomaly` → 점수·verdict를 **보조 표시**(등급은 안 바꿈) ③ `insider_signal` → 매도 군집이면 🟡 새 규칙 `insider_sell_cluster` ④ `search_news` → **등급 `none`인 종목만** 최대 5건 (F11) ⑤ 티커→corp_code는 **기존 `corp.py` 유지** | ②는 아이디어 §2-1 "점수만 보여주지 말 것". ④는 아이디어 §2-2 "공시로 설명 안 될 때만 뉴스". ⑤ `resolve_corp_code`는 이름 기반(동명 위험) + 콜드스타트 적재를 매일 반복 — 우리 방식은 1회 호출·티커 정확 |
-| **D14** | korea-stock-mcp | **확정: 포함** (2026-08-29 사용자 결정 — 제외 권고를 뒤집음) | 배치에 등록하고 **`get_stock_trade_info(isuSrtCd, from, to)`**로 KRX 일별 매매정보를 받아 **시가총액·상장주식수·최근 5일 거래대금**을 보조 신호 ③에 참고 표시한다 (F12 v2.0). 순매수(기관·외국인)는 이 서버에 없으므로 **F12에서 제외**하고, 필요해지면 pykrx로 별도 검토 | 새로 주는 값은 시가총액·상장주식수(우리 `ksc_bars`에 없음) — CB·유상증자 규모를 시총과 견줄 수 있다. 대가: `KRX_API_KEY` 발급(승인 ~1일) + 종목당 호출 1회 추가. 실패·키 없음이면 생략(D15) |
+| **D14** | 시세 참고(시총·거래대금)를 어디서 | **확정 v2 (2026-08-29 사용자 결정)** — **상위 `krx-stock-charts`가 수집, 우리는 읽기만.** korea-stock-mcp는 **배치에서 제외**(대화형 등록은 자유) | 상위 SPEC에 **F8(시가총액·상장주식수 수집)**을 신설했다 — 상위는 이미 pykrx로 KRX에 붙어 있어 `get_market_cap_by_ticker(date, "ALL")` **1회**로 전 종목 시총을 받아 `ksc_tickers.mktcap`·`list_shrs`·`mktcap_d`에 매일 채운다. 우리는 `ksc_bars.a`(5일 거래대금)와 함께 **SQL 한 번**으로 읽는다 | 처음 안(korea-stock-mcp)은 **KRX OPEN API 키 신규 발급**(승인 ~1일) + 하루 ≤18회 호출이 필요했다. 상위 경유는 **새 키 0개 · 외부 호출 0회**이고, 상위가 쓰는 `KRX_ID`/`KRX_PW`는 이미 있다. 차트 대시보드도 시총을 쓸 수 있다. 대가: 상위 SPEC 변경(2026-08-29 사용자 승인) |
 | **D15** | 실패 처리·폴백 | 추천 | korean-dart-mcp 기동·호출 실패 → **`dart.py` REST로 공시 조회 폴백**(이미 구현·테스트됨) → 메일은 간다. anomaly·insider·뉴스는 **있으면 좋은 층** — 실패 시 생략하고 본문에 표기 | 상위 원칙 "실패는 시끄럽게, 단 살아 있는 채널은 간다". npm 레지스트리·Node 기동 실패가 아침 메일을 막으면 안 된다 |
+
+**고정 버전과 실측** (2026-08-29 로컬 기동, MCP 파이썬 SDK 2.1.1)
+
+| 서버 | 고정 버전 | 기동(초, 콜드/웜) | 실측 |
+|------|-----------|-------------------|------|
+| `korean-dart-mcp` | **0.10.1** | **10.9 / 0.6** (콜드는 corp 덤프 다운로드 포함) | 도구 **18개**. `search_disclosures`는 인자가 `corp`(이름/티커/corp_code 아무거나)·`days`이고 **기본이 페이지 모드(20건/페이지)** — 삼성전자 30일 61건이 4페이지. 전체를 받으려면 `all_pages: true`(+`limit`). `include_corrections`·`final_only`로 정정 포함 여부 제어. 항목 필드는 REST와 동일(`rcept_dt`·`report_nm`·`rcept_no`·`flr_nm`·`rm`). `disclosure_anomaly` → `score`·`verdict`·`flags`·`audit_timeline` (2.3초). `insider_signal` → `summary.signal`(`strong_sell_cluster` 등)·`quarterly_clusters` (0.4초). 서버 배너는 "v0.9.2"로 찍힌다(패키지 버전과 불일치 — 무시) |
+| `@isnow890/naver-search-mcp` | **1.0.50** | — | **자격증명이 없으면 기동 자체를 거부**한다(`자격증명이 설정되지 않았습니다`). D15는 "호출 실패"뿐 아니라 "서버 미기동"도 생략 경로로 다뤄야 한다 |
+| `korea-stock-mcp` | **1.4.1** | 1.4 / 0.5 | 도구 8개. `get_corp_code(stock_code)`는 KRX 키 없이 동작(티커→corp_code 대안). `get_stock_trade_info`·`get_stock_base_info`는 인자가 **`basDdList`·`market`·`codeList`**(README와 다름)이고 KRX 키가 없으면 `is_error=True` + `There is no KRX API KEY` |
+
+- MCP SDK 2.x는 응답 필드가 **snake_case**다 (`tool.input_schema`, `result.is_error`) — 1.x 문서의 camelCase와 다르다.
+- 표본: `tests/fixtures/mcp_search_disclosures.json` · `mcp_anomaly.json` · `mcp_insider.json` · `mcp_stock_corp_code.json` · `mcp_stock_error_nokey.txt` (naver는 키 발급 후).
 
 **v1.1 대비 달라지는 요구사항** — 아래 F4·F4b·F11·F12·N4·N14·R14~R18·§8·§9에 반영했다.
 
@@ -178,13 +189,13 @@
 
 **F4. 최근 30일 공시 조회** (v2.0: MCP 경유, D13·D15)
 
-종목마다 korean-dart-mcp `search_disclosures(corp_code, days=30)`를 **1회** 부른다. 응답 항목을 `Disclosure`로 바꾸는 것까지가 I/O 층(`dart_mcp.py`)의 일이고, 판정은 F5 그대로다.
+종목마다 korean-dart-mcp `search_disclosures(corp=corp_code, days=30, all_pages=true, limit=100)`를 **1회** 부른다 (페이지 모드는 20건에서 잘린다 — 실측). 응답 항목을 `Disclosure`로 바꾸는 것까지가 I/O 층(`dart_mcp.py`)의 일이고, 판정은 F5 그대로다.
 - MCP 서버 기동·호출이 실패하면(타임아웃 30초) **`dart.py` REST(`list.json`)로 폴백**한다. 폴백 여부를 `ksb_runs.detail`에 남긴다.
 - MCP도 REST도 실패하면 그 종목은 `error`.
 
 **F4b. 보조 신호** (v2.0 신설, D13 ②·③ — 있으면 좋은 층)
 - `disclosure_anomaly(corp)` → `score`(0~100)·`verdict`(clean/watch/warning/red_flag)를 **`ksb_briefings.anomaly` jsonb**에 저장하고 본문에 한 줄 표시. **등급(F5)은 바꾸지 않는다** — 점수는 근거를 숨기므로 참고값이다.
-- `insider_signal(corp, start=D−30, end=D)` → 매도 군집(`*_sell_cluster`)이면 🟡 `insider_sell_cluster` 플래그. 매수 군집은 참고 표시만.
+- `insider_signal(corp, start=D−30, end=D)` → 매도 군집(`*_sell_cluster`)이면 🟡 `insider_sell_cluster` 플래그(근거: 매도 건수·인원·순변동주식). 매수 군집은 참고 표시만. 집계값은 **`ksb_briefings.insider` jsonb**에 저장한다 (2026-08-29 구현 시 추가 — 렌더 근거용).
 - 둘 다 실패·타임아웃 시 생략하고 `⚠ 보조 신호 생략`을 붙인다. 워크플로는 실패시키지 않는다.
 
 (v1.1 원문 — REST 직접 호출 기준. 폴백 경로로 그대로 유효)
@@ -326,7 +337,7 @@
 | ID | 내용 | 붙이는 조건 |
 |----|------|------------|
 | **F11** → **v1 승격 (v2.0)** | 네이버 뉴스 — naver-search-mcp `search_news(query=종목명, display=5, sort="date")`. **등급 `none`인 종목만**(드라이런 84%). 제목·언론사·날짜·링크를 `ksb_briefings.news` jsonb에 저장하고 본문에 나열, LLM 요약 입력에 포함 | NCP API HUB 키 필요. PlayMCP 경로는 무인 배치 불가(로그인 세션·403 실측). 동음이의 노이즈(R17)는 v1에서 걸러내지 않고 **링크와 함께 사실로 나열**만 한다 |
-| **F12** → **v1 (v2.0, D14)** | korea-stock-mcp `get_stock_trade_info(isuSrtCd=티커, from=D−7, to=D)` → **시가총액 · 상장주식수 · 최근 5거래일 거래대금**을 `ksb_briefings.flow` jsonb에 저장하고 보조 신호 줄에 참고 표시 (`시총 1,240억 · 5일 거래대금 380억`). **순매수는 제공되지 않는다** — 본문에 넣지 않는다 | `KRX_API_KEY` 필요. 응답 필드(시총·상장주식수 포함 여부)는 M1b에서 실표본으로 확인. 실패·키 없음 → 생략 + `⚠ 시세 참고 생략` |
+| **F12** → **v1 (v2.0, D14 v2)** | **상위 DB에서 SQL 한 번**: `ksc_tickers`(시가총액·상장주식수·기준일, 상위 F8) + `ksc_bars.a` 최근 5거래일 합(거래대금) → `ksb_briefings.flow` jsonb에 저장하고 보조 신호 줄에 참고 표시 (`시총 6,113억 · 5일 거래대금 32억 (08/27)`). **순매수는 넣지 않는다** — 어느 소스에도 없다 | 외부 호출 0회 · 새 키 0개. `load_market` 노드가 배치 1회로 읽어 `fan_out`이 종목별로 나눠 준다. 상위가 아직 시총을 안 채웠거나 조회가 실패하면 생략 + `⚠ 시세 참고 생략`. **실측 2026-08-29**: 2,767/2,769종목 수집, 조회 정상 |
 | **F14+** | 요약에 공시 **본문** 반영 (`document.xml`로 CB 규모·전환가 등) | v1 요약이 제목만으로 부족하다고 판단될 때. 호출 수가 종목당 +N회가 된다 |
 
 ---
@@ -397,7 +408,7 @@ create table if not exists ksb_runs (
 | **R10** | **LLM 환각·판단어** | 입력에 없는 공시를 지어내거나 "주의"·"호재" 같은 판단어를 쓸 수 있다 | F14 입력을 제목·날짜로 좁힌다 · N13 코드 검증으로 걸린 요약은 버린다 · 요약은 등급을 바꾸지 못한다 · 원문 링크가 항상 옆에 있어 사람이 대조할 수 있다 |
 | **R11** | **LLM 장애가 메일을 막는다** | API 다운·키 만료·한도 | F14 — 요약 없이 보낸다. LLM은 `summarize` 노드 하나에 갇혀 있고 그 노드는 예외를 밖으로 내지 않는다 (N5·N11) |
 | **R12** | **`ANTHROPIC_API_KEY` 미발급** (D11) | 발급 전엔 요약 없이 돈다 | 키가 없으면 `summarize`를 건너뛰고 `⚠ 요약 생성 실패(키 없음)`으로 드러낸다 — 조용히 빠지지 않는다 |
-| **R19** (v2.0) | **KRX OPEN API 키** (D14) | 등록·승인에 ~1일. 승인 전엔 korea-stock-mcp가 기동만 되고 조회는 실패 | F12를 생략 경로로 두어 승인 전에도 메일은 간다. 키 만료·한도는 M1b에서 확인 |
+| **R19** (v2.0 → 해소) | ~~KRX OPEN API 키~~ | **D14 v2로 사라졌다** — 상위가 이미 가진 `KRX_ID`/`KRX_PW`(pykrx)로 수집하므로 새 키가 필요 없다 | 대신 **상위 의존이 하나 늘었다**: 상위 일일 갱신이 시총을 못 채우면 우리 시세 줄이 생략된다(메일은 정상). 상위 `ksc_meta.update.marketCaps`로 확인 가능 |
 | **R14** (v2.0) | **npx 콜드스타트** | CI마다 Node 설치 + 두 패키지 다운로드 + korean-dart-mcp corp 코드 11.6만 건 적재 | `setup-node` 캐시 + `~/.korean-dart-mcp`·npm 캐시를 Actions 캐시에 물린다. 기동 시간을 측정해 60초 넘으면 D13 ⑤처럼 corp 적재를 우회하는 방법을 찾는다 |
 | **R15** (v2.0) | **네이버 키** | 신규 발급(NCP API HUB). 구 developers 키는 2027-06-30 종료 | M1c 전 발급. 없으면 F11을 건너뛰고 `⚠ 뉴스 생략` |
 | **R16** (v2.0) | **업스트림 MCP 변경** | 남의 패키지다 — 도구 이름·응답 형태가 바뀔 수 있다 | 버전 고정(N14) + 응답 형태 계약 테스트(표본 JSON) + 실패 시 폴백(D15) |
@@ -437,7 +448,7 @@ create table if not exists ksb_runs (
 | LLM | **Claude Opus 5 `claude-opus-5`** · 공식 `anthropic` SDK · 하루 1회 일괄 호출 (D11) |
 | 저장 | Supabase PostgreSQL (기존 프로젝트, 접두어 `ksb_`) |
 | 트리거 | 상위 `alert.yml` → `repository_dispatch` (주) · 예비 cron 평일 09:05 KST · DB 게이트 (D3 v1.1) |
-| **MCP (v2.0)** | **korean-dart-mcp**(공시·anomaly·insider) · **naver-search-mcp**(뉴스) · **korea-stock-mcp**(시총·거래대금, D14) — `npx -y` stdio, MCP 파이썬 SDK `mcp` 클라이언트, 버전 고정 |
+| **MCP (v2.0)** | **korean-dart-mcp**(공시·anomaly·insider) · **naver-search-mcp**(뉴스) — `npx -y` stdio, MCP 파이썬 SDK `mcp` 클라이언트, 버전 고정. korea-stock-mcp는 배치에서 제외(D14 v2) |
 | 런타임 | Python 3.11 + **Node 20.19+** (CI `setup-node`) |
 | 알림 | Gmail SMTP (`smtplib`, 상위와 같은 자격증명) |
 | 테스트 | pytest · ruff · mypy(strict) · 외부 I/O(DART·LLM·SMTP·DB) 전부 mock |
@@ -454,7 +465,7 @@ create table if not exists ksb_runs (
 6. 메일이 받은편지함에 들어오는 것 확인 (R9)
 7. **LLM 요약**: 5거래일 요약 전 건이 N13 검증을 통과하고, 원문과 대조해 **입력에 없는 사실이 0건** · LLM 키를 일부러 빼고 돌렸을 때 `⚠ 요약 생성 실패`가 붙은 메일이 도착하는 것 확인 (R11·R12)
 8. 파이썬 검증 3종 통과 · `docs/GRAPH.md` 최신 (N12) · 배포 전 보안 점검 완료 (N9)
-9. **(v2.0)** CI에서 MCP 서버 3종 기동·호출 성공, 기동 시간 기록 · korean-dart-mcp를 일부러 죽였을 때 REST 폴백으로 메일 도착 · 네이버 키를 빼고 돌렸을 때 `⚠ 뉴스 생략`으로 메일 도착 · `none` 종목에 뉴스가 붙은 메일 1통 손검증
+9. **(v2.0)** CI에서 MCP 서버 2종 기동·호출 성공, 기동 시간 기록 · korean-dart-mcp를 일부러 죽였을 때 REST 폴백으로 메일 도착 · 네이버 키를 빼고 돌렸을 때 `⚠ 뉴스 생략`으로 메일 도착 · `none` 종목에 뉴스가 붙은 메일 1통 손검증
 
 ---
 
@@ -476,7 +487,8 @@ create table if not exists ksb_runs (
 | 2026-08-26 | v0.9 | 최초 작성. **D2(별도 메일)·D4(REST 직접, MCP 없음)·D6(DART만) 사용자 확정.** D1·D3·D5·D7~D10 추천안 제시. 아이디어 문서 대비 달라진 판단 4건을 §2-2에 기록 |
 | 2026-08-26 | v0.95 | **D1·D3·D5·D8·D9 추천안대로 확정. D7 → LLM v1 포함, D10 → LangGraph 사용으로 사용자가 추천안을 뒤집음.** F14를 v1로 승격(일괄 1회·실패 시 요약 없이 발송), N3 재작성·N11~N13 신설, R10~R12 신설, `ksb_runs`에 `summary_n`·`llm_tokens` 추가, 완료 기준 7 추가. **D11(LLM 제공자) 신설 — 확정 대기** |
 | 2026-08-26 | **v1.0 확정** | **D11 확정 — Claude Opus 5 `claude-opus-5` + 공식 `anthropic` SDK.** D1~D11 전부 확정. 준비물: OpenDART 키(R1) · Anthropic 키(R12) |
-| 2026-08-29 | v2.0.1 | **D14 확정: korea-stock-mcp 포함** (사용자 결정). 용도 = `get_stock_trade_info`로 시총·상장주식수·거래대금 참고 표시(F12 v1 승격, 순매수는 제외). R19 KRX 키 신설 |
+| 2026-08-29 | **v2.0.2** | **D14 재확정 — 시세는 상위 DB에서 읽는다** (사용자 결정). 상위 `krx-stock-charts`에 **SPEC F8 신설**(pykrx 1회로 시총·상장주식수 수집 → `ksc_tickers`), 우리는 `ksc_bars.a`와 함께 SQL 한 번으로 읽는다. **korea-stock-mcp·KRX OPEN API 키 불필요** → R19 해소, `briefing/stock_mcp.py` 삭제. F12·§8·§9 갱신 |
+| 2026-08-29 | v2.0.1 | ~~D14: korea-stock-mcp 포함~~ → v2.0.2에서 대체됨 |
 | 2026-08-29 | **v2.0 검토** | **MCP 3종 활용 전환** (사용자 지시). §2-3 신설: 조사 결과(korea-stock-mcp에 순매수 도구 없음) + D12~D15 추천안. D4·D6 변경, F4 MCP 경유 + REST 폴백, F4b 보조 신호(anomaly·insider), F11 뉴스 v1 승격, N4·N14·R14~R18·§8·§9 갱신. **D12~D15 확정 후 v2.0 확정** |
 | 2026-08-29 | v1.2 | **F5 규칙표 개정** — 실표본(153종목 · 3,000건)으로 래퍼 부분 일치 · 자회사 강등 · 접두 6종 · 제외어 · 🟡 6규칙 추가 · 대량보유 제거. 드라이런 165건: 🔴 8% · 🟡 8% · none 84% · unknown 0 · 020 0. **🔴 13건 손검증 뒤 확정** |
 | 2026-08-26 | v1.1.1 | 실DB 확인 반영 — **F2 대상 조건을 `suppressed = false`로 변경** (상위가 `sent_email`을 저장하지 않음). 상위 배치 실측: cron 08:20이지만 실제 시작 **08:41~08:45 KST**(5일 연속 20분 이상 지연) — D3 dispatch 방식의 근거가 됨 |

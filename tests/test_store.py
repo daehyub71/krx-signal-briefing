@@ -68,3 +68,31 @@ def test_fetch_signal_rows_since_builds_signal_rows() -> None:
     out = store.fetch_signal_rows_since(c, date(2026, 6, 1))  # type: ignore[arg-type]
     assert len(out) == 1 and out[0].ticker == "079940" and out[0].strategy == "mtf"
     assert out[0].evidence == {} and "not suppressed" in c.sql
+
+
+def test_fetch_flows_reads_upstream_tables() -> None:
+    c = FakeConn(
+        [
+            (
+                "079940",
+                611_312_156_200,
+                13_420_684,
+                date(2026, 8, 27),
+                3_250_819_650,
+                5,
+                date(2026, 8, 27),
+                45550,
+            )
+        ]
+    )
+    flows = store.fetch_flows(c, ["079940"])  # type: ignore[arg-type]
+    assert flows["079940"].mktcap == 611_312_156_200 and flows["079940"].days == 5
+    assert flows["079940"].bas_dd == "20260827" and flows["079940"].close == 45550
+    assert "ksc_tickers" in c.sql and "ksc_bars" in c.sql and "mktcap is not null" in c.sql
+    assert c.params == (5, ["079940"])
+
+
+def test_fetch_flows_empty_tickers_makes_no_query() -> None:
+    c = FakeConn([])
+    assert store.fetch_flows(c, []) == {}  # type: ignore[arg-type]
+    assert c.sql == ""

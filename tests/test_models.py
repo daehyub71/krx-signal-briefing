@@ -43,9 +43,7 @@ def make_briefing(**kw: object) -> Briefing:
         "corp_code": "00123456",
         "level": "red",
         "flags": (
-            Flag(
-                rule="cb", level="red", rcept_no="20260822000123", report_nm="전환사채권발행결정"
-            ),
+            Flag(rule="cb", level="red", rcept_no="20260822000123", report_nm="전환사채권발행결정"),
         ),
         "disclosures": (make_disclosure(),),
     }
@@ -84,8 +82,19 @@ def test_briefing_is_frozen() -> None:
 def test_briefing_to_row_matches_schema_columns() -> None:
     row = make_briefing().to_row()
     assert set(row) == {
-        "d", "strategy", "ticker", "name", "corp_code", "level",
-        "flags", "disclosures", "window_days", "summary",
+        "d",
+        "strategy",
+        "ticker",
+        "name",
+        "corp_code",
+        "level",
+        "flags",
+        "disclosures",
+        "window_days",
+        "summary",
+        "anomaly",
+        "insider",
+        "flow",
     }
     assert row["d"] == "2026-08-25"
     assert row["level"] == "red"
@@ -156,14 +165,27 @@ def test_send_result_defaults() -> None:
 
 def test_run_record_to_row_and_statuses() -> None:
     rec = RunRecord(
-        data_date=D, signal_n=15, red_n=2, amber_n=3, error_n=0,
-        dart_calls=16, summary_n=12, llm_tokens=8100, status="ok", detail={"x": 1},
+        data_date=D,
+        signal_n=15,
+        red_n=2,
+        amber_n=3,
+        error_n=0,
+        dart_calls=16,
+        summary_n=12,
+        llm_tokens=8100,
+        status="ok",
+        detail={"x": 1},
     )
     row = rec.to_row()
     assert row["data_date"] == "2026-08-25" and row["status"] == "ok"
     assert row["detail"] == {"x": 1}
     assert RUN_STATUSES == (
-        "ok", "no_signals", "gate_timeout", "dart_partial", "dart_failed", "send_failed"
+        "ok",
+        "no_signals",
+        "gate_timeout",
+        "dart_partial",
+        "dart_failed",
+        "send_failed",
     )
 
 
@@ -171,3 +193,33 @@ def test_run_record_allows_null_data_date() -> None:
     """게이트 실패 시 기준일을 모른다 — null로 남긴다."""
     rec = RunRecord(data_date=None, status="gate_timeout")
     assert rec.to_row()["data_date"] is None
+
+
+# ── anomaly · insider (F4b, v2.0) ────────────────────────────────
+
+from briefing.models import Anomaly, Insider  # noqa: E402
+
+
+def test_briefing_to_row_includes_anomaly_and_insider_columns() -> None:
+    b = make_briefing(
+        anomaly=Anomaly(score=68, verdict="warning", summary="s", flags=("auditor_change",)),
+        insider=Insider(
+            signal="sell_cluster", sell_events=5, unique_sellers=3, net_change_shares=-100
+        ),
+    )
+    row = b.to_row()
+    assert row["anomaly"] == {
+        "score": 68,
+        "verdict": "warning",
+        "summary": "s",
+        "flags": ["auditor_change"],
+    }
+    assert (
+        row["insider"]["signal"] == "sell_cluster" and row["insider"]["net_change_shares"] == -100
+    )
+    assert set(row) >= {"anomaly", "insider"}
+
+
+def test_briefing_to_row_anomaly_insider_null_when_absent() -> None:
+    row = make_briefing().to_row()
+    assert row["anomaly"] is None and row["insider"] is None

@@ -11,7 +11,7 @@ import operator
 from datetime import date
 from typing import Annotated, TypedDict
 
-from briefing.models import Briefing, SendResult, SignalRow
+from briefing.models import Briefing, Flow, SendResult, SignalRow
 
 # ── 게이트 판정값 (F1) ─────────────────────────────────────────
 GATE_READY = "ready"      # 오늘 ksa_runs 행 있음 · 신호 저장됨
@@ -53,6 +53,8 @@ class FetchItem(TypedDict):
     existing: Briefing | None
     force: bool
     run_date: date  # 조회 창의 끝 (F4: bgn = run_date − 30, end = run_date)
+    flow: Flow | None  # load_market이 배치 1회로 받아 둔 시세 참고 (F12). 없으면 None
+    flow_skipped: bool  # 시세 층 전체가 생략됐는가 (키 없음·서버 미기동) → skipped += 'flow'
 
 
 class BriefingState(TypedDict, total=False):
@@ -76,6 +78,8 @@ class BriefingState(TypedDict, total=False):
     signals: list[SignalRow]
     existing: dict[str, Briefing]   # briefing_key → 그날 이미 있는 브리핑 (멱등)
     corp_codes: dict[str, str]      # ticker → corp_code
+    flows: dict[str, Flow]          # ticker → 시세 참고 (F12, load_market 배치 1회)
+    flow_skipped: str               # 시세 층 생략 사유. "" = 정상
 
     # fan-out 합류 — 리듀서 필수
     briefings: Annotated[list[Briefing], operator.add]
@@ -115,6 +119,8 @@ def initial_state(run_date: date, *, dry_run: bool = False, force: bool = False)
         signals=[],
         existing={},
         corp_codes={},
+        flows={},
+        flow_skipped="",
         briefings=[],
         dart_calls=0,
         summaries={},

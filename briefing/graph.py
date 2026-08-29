@@ -45,6 +45,7 @@ def build_graph(overrides: Mapping[str, Callable[..., Any]] | None = None) -> An
     g.add_node("wait", pick("wait", nodes.wait))
     g.add_node("load_signals", pick("load_signals", nodes.load_signals), retry_policy=NETWORK_RETRY)
     g.add_node("load_corps", pick("load_corps", nodes.load_corps), retry_policy=NETWORK_RETRY)
+    g.add_node("load_market", pick("load_market", nodes.load_market))
     g.add_node("fetch_one", pick("fetch_one", nodes.fetch_one))
     g.add_node("summarize", pick("summarize", nodes.summarize))
     g.add_node("render", pick("render", nodes.render))
@@ -70,11 +71,13 @@ def build_graph(overrides: Mapping[str, Callable[..., Any]] | None = None) -> An
     g.add_edge("wait", "gate")
 
     g.add_edge("load_signals", "load_corps")
+    # 시세 참고는 배치 1회 (F12) — 종목당 부르면 270회
+    g.add_edge("load_corps", "load_market")
 
     # 종목별 fan-out → summarize에서 합류. briefings 리듀서가 결과를 합친다.
     # 신호 0건이면 Send 없이 summarize로 직행한다 — 빈 Send 목록은 그래프를 조용히 끝낸다.
     g.add_conditional_edges(
-        "load_corps", pick("fan_out", nodes.fan_out), ["fetch_one", "summarize"]
+        "load_market", pick("fan_out", nodes.fan_out), ["fetch_one", "summarize"]
     )
     g.add_edge("fetch_one", "summarize")
 

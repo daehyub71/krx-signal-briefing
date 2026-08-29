@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import Literal
 
-from briefing.models import Disclosure, Flag, FlagLevel
+from briefing.models import Disclosure, Flag, FlagLevel, Insider
 
 Verdict_Level = Literal["red", "amber", "none"]
 
@@ -155,8 +155,30 @@ def match(report_nm: str, company_name: str = "") -> Match | None:
     return None
 
 
+# ── 🟡 insider_sell_cluster — 제목이 아니라 korean-dart-mcp insider_signal 입력 (F4b·D13 ③) ──
+
+INSIDER_RULE = "insider_sell_cluster"
+
+
+def insider_flag(insider: Insider | None) -> Flag | None:
+    """임원·주요주주 **매도 군집**이면 🟡 플래그. 매수 군집·신호 없음은 플래그 없음 (참고 표시만).
+
+    근거를 남긴다 — 몇 명이 얼마나 팔았는지. 접수번호는 없다(여러 보고서의 집계).
+    """
+    if insider is None or not insider.sell_cluster:
+        return None
+    text = (
+        f"임원·주요주주 매도 군집 — 매도 {insider.sell_events}건 · {insider.unique_sellers}명"
+        f" · 순변동 {insider.net_change_shares:+,}주"
+    )
+    return Flag(rule=INSIDER_RULE, level="amber", rcept_no="", report_nm=text)
+
+
 def classify(
-    disclosures: list[Disclosure] | tuple[Disclosure, ...], *, company_name: str = ""
+    disclosures: list[Disclosure] | tuple[Disclosure, ...],
+    *,
+    company_name: str = "",
+    insider: Insider | None = None,
 ) -> Verdict:
     """종목 하나의 공시 목록을 판정한다 (F5·F6).
 
@@ -177,6 +199,8 @@ def classify(
             continue
         rule = f"{m.rule}(자회사)" if m.subsidiary else m.rule
         flags.append(Flag(rule=rule, level=m.level, rcept_no=d.rcept_no, report_nm=d.report_nm))
+    if (extra := insider_flag(insider)) is not None:
+        flags.append(extra)
     level: Verdict_Level = "none"
     if any(f.level == "red" for f in flags):
         level = "red"

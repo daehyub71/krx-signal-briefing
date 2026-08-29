@@ -15,3 +15,15 @@
 | `list_sample.json` | 같은 스크립트 | `list.json` 항목 원문 12건 (`Disclosure.to_json()` 형태) |
 
 표본을 다시 뽑을 때: `python scripts/sample_reports.py` (DART 호출 = 종목 수 + 1).
+
+## MCP 응답 표본 (v2.0 · 2026-08-29 · 삼성전자 00126380)
+
+| 파일 | 서버 · 도구 | 내용 |
+|------|------------|------|
+| `mcp_search_disclosures.json` | korean-dart-mcp@0.10.1 `search_disclosures(corp, days=30)` | 페이지 모드 응답 — `total_count 61 · page 1/4 · items 20`. 항목 필드는 REST `list.json`과 동일 |
+| `mcp_anomaly.json` | `disclosure_anomaly(corp)` | `score 0 · verdict clean · flags · audit_timeline` |
+| `mcp_insider.json` | `insider_signal(corp, start, end)` | `summary.signal = strong_sell_cluster` · `quarterly_clusters` |
+| `mcp_stock_corp_code.json` | korea-stock-mcp@1.4.1 `get_corp_code(stock_code)` | KRX 키 없이 동작 |
+| `mcp_stock_error_nokey.txt` | `get_stock_trade_info` (KRX 키 없음) | `is_error=True` 본문 원문 |
+
+naver-search-mcp 표본은 NCP 키 발급 후 수집한다. 프로브 스크립트: `scripts/`에 M1b `mcpc.py`가 들어오면 그것으로 대체.

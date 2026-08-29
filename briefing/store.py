@@ -2,22 +2,22 @@
 
 | 경로 | 쓰는 곳 | 이유 |
 |------|---------|------|
-| psycopg (직접 SQL) | `ksa_*` 읽기 · 게이트 | 1,000행 절단 없음 · 시간대 변환이 SQL에서 끝남 |
+| psycopg (직접 SQL) | `ksa_*`·`ksc_*` 읽기 | 1,000행 절단 없음 · 집계가 SQL에서 끝남 |
 | supabase-py (REST) | `ksb_*` 쓰기 | 소량이고 upsert가 간단하다 |
 
-`ksa_*`·`ksc_*`에는 절대 쓰지 않는다 — 상위 프로젝트 소유다.
-M0: 연결과 게이트 조회만. 나머지는 TODO(M2).
+`ksa_*`·`ksc_*`에는 절대 쓰지 않는다 — 상위 프로젝트 소유다. 읽기만 한다.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date
 from typing import Any
 
 import psycopg
 
 from briefing import config
-from briefing.models import SignalRow
+from briefing.models import Flow, SignalRow
 
 _conn: psycopg.Connection[Any] | None = None
 
@@ -69,9 +69,7 @@ def fetch_today_run(c: psycopg.Connection[Any], run_date: date) -> tuple[date | 
     return (row[0], str(row[1])) if row else None
 
 
-def fetch_signal_tickers_since(
-    c: psycopg.Connection[Any], since: date
-) -> list[tuple[str, str]]:
+def fetch_signal_tickers_since(c: psycopg.Connection[Any], since: date) -> list[tuple[str, str]]:
     """일정 기간의 신호 종목(억제 제외) — 표본 수집·드라이런용.
 
     Args:
@@ -103,6 +101,53 @@ def fetch_signal_rows_since(c: psycopg.Connection[Any], since: date) -> list[Sig
     return [SignalRow(d=d, strategy=str(s), ticker=str(t), name=str(n)) for d, s, t, n in rows]
 
 
+def fetch_flows(
+    c: psycopg.Connection[Any], tickers: Sequence[str], days: int = 5
+) -> dict[str, Flow]:
+    """시세 참고 — 시총·상장주식수는 `ksc_tickers`, 최근 N거래일 거래대금은 `ksc_bars` (F12·D14 v2).
+
+    **호출 0회, 키 0개.** 상위 `krx-stock-charts`가 매일 채워 둔 값을 SQL 한 번으로 읽는다
+    (상위 SPEC F8, 2026-08-29 신설 — korea-stock-mcp + KRX OPEN API 키를 대체했다).
+
+    Args:
+        c: DB 연결.
+        tickers: 대상 종목.
+        days: 거래대금을 합칠 최근 거래일 수.
+
+    Returns:
+        `{ticker: Flow}`. 시총이 아직 없는 종목(상위 수집 전)은 빠진다.
+    """
+    if not tickers:
+        return {}
+    rows = c.execute(
+        """
+        select t.ticker, t.mktcap, t.list_shrs, t.mktcap_d,
+               coalesce(x.trdval, 0), coalesce(x.days, 0), x.last_d, coalesce(x.close, 0)
+          from ksc_tickers t
+          left join lateral (
+              select sum(b.a) as trdval, count(*) as days,
+                     max(b.d) as last_d, (array_agg(b.c order by b.d desc))[1] as close
+                from (select d, a, c from ksc_bars
+                       where ticker = t.ticker and timeframe = 'D'
+                       order by d desc limit %s) b
+          ) x on true
+         where t.ticker = any(%s) and t.mktcap is not null
+        """,
+        (days, list(tickers)),
+    ).fetchall()
+    return {
+        str(ticker): Flow(
+            bas_dd=(last_d or mktcap_d).strftime("%Y%m%d"),
+            close=int(close),
+            mktcap=int(mktcap),
+            list_shrs=int(list_shrs or 0),
+            trdval_5d=int(trdval),
+            days=int(n_days),
+        )
+        for ticker, mktcap, list_shrs, mktcap_d, trdval, n_days, last_d, close in rows
+    }
+
+
 # ── ksb_runs ────────────────────────────────────────────────────
 
 
@@ -118,8 +163,7 @@ def briefed_today(c: psycopg.Connection[Any], run_date: date) -> bool:
         실패로 끝난 날도 "돌았다"이며, 다시 돌리려면 `--force`로 수동 실행한다.
     """
     row = c.execute(
-        "select exists(select 1 from ksb_runs"
-        " where (run_at at time zone 'Asia/Seoul')::date = %s)",
+        "select exists(select 1 from ksb_runs where (run_at at time zone 'Asia/Seoul')::date = %s)",
         (run_date,),
     ).fetchone()
     return bool(row[0]) if row else False

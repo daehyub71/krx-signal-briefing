@@ -58,7 +58,13 @@ create table if not exists ksb_briefings (
 -- ── 마이그레이션 ──────────────────────────────
 -- `create table if not exists`는 **이미 있는 테이블에 열을 추가하지 않는다.**
 -- 열을 늘릴 때는 반드시 여기에 `alter table ... add column if not exists` 한 줄을 더한다.
--- (아직 없음)
+
+-- v2.0 (2026-08-29) F4b 보조 신호 — korean-dart-mcp
+--   anomaly: disclosure_anomaly {score, verdict, summary, flags}  — 등급을 바꾸지 않는 참고값
+--   insider: insider_signal {signal, buy/sell 건수, 인원, 순변동주식, summary} — 매도 군집이면 🟡 플래그
+--   null = 그날 생략됨(서버 미기동·실패). '없음'이 아니라 '못 봄'이다.
+alter table ksb_briefings add column if not exists anomaly jsonb;
+alter table ksb_briefings add column if not exists insider jsonb;
 
 -- 종목축 조회(드라이런·이력)용. PK는 (d, strategy, ticker) 순서라 종목축을 못 받는다.
 create index if not exists ksb_briefings_by_ticker

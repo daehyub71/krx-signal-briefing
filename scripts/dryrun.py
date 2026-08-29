@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from briefing import config, corp, dart, flags, store  # noqa: E402
+from briefing import config, corp, dart, dart_mcp, flags, mcpc, store  # noqa: E402
 from briefing.models import WINDOW_DAYS, Disclosure, SignalRow, dart_link  # noqa: E402
 
 STRATEGY_LABELS = {
@@ -47,6 +47,12 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 — 보고서 �
     p.add_argument("--limit", type=int, default=0, help="신호 수 상한 (0=전부)")
     p.add_argument("--pause", type=float, default=0.1)
     p.add_argument("--out", default="docs/dryrun_m1.md")
+    p.add_argument(
+        "--source",
+        choices=["mcp", "rest", "both"],
+        default="rest",
+        help="공시 경로. both면 두 경로를 모두 받아 목록이 같은지 대조한다 (M1b)",
+    )
     args = p.parse_args(argv)
     config.load_env()
 
@@ -63,13 +69,16 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 — 보고서 �
     print(f"[signals] {len(signals)}건 · {len(days)}거래일 · 하루 평균 {per_day:.1f}건")
 
     codes = corp.parse_corp_codes(dart.fetch_corp_codes())
+    if args.source in ("mcp", "both"):
+        mcpc.get("dart")  # 기동 실패면 여기서 McpStartError — 조용히 REST로 새지 않는다
 
     # 종목당 1회 — 신호일 범위를 덮는 창
     by_ticker: dict[str, list[SignalRow]] = collections.defaultdict(list)
     for s in signals:
         by_ticker[s.ticker].append(s)
     cache: dict[str, list[Disclosure] | Exception] = {}
-    calls = rate_limited = 0
+    calls = rate_limited = mcp_failed = 0
+    mismatch: list[tuple[str, int, int]] = []
     for i, (ticker, rows) in enumerate(by_ticker.items(), 1):
         code = codes.get(ticker)
         if code is None:
@@ -77,13 +86,31 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 — 보고서 �
         bgn = window_of(min(r.d for r in rows))[0]
         end = window_of(max(r.d for r in rows))[1]
         try:
-            cache[ticker] = dart.fetch_disclosures(code, bgn, end)
+            if args.source in ("mcp", "both"):
+                items = dart_mcp.fetch_disclosures(code, bgn, end)
+                calls += 1
+                if args.source == "both":
+                    rest_items = dart.fetch_disclosures(code, bgn, end)
+                    calls += 1
+                    if {d.rcept_no for d in items} != {d.rcept_no for d in rest_items}:
+                        mismatch.append((ticker, len(items), len(rest_items)))
+            else:
+                items = dart.fetch_disclosures(code, bgn, end)
+                calls += 1
+            cache[ticker] = items
+        except mcpc.McpError as exc:
+            mcp_failed += 1
+            try:  # D15 폴백 — MCP가 죽어도 REST로 받는다
+                cache[ticker] = dart.fetch_disclosures(code, bgn, end)
+                calls += 1
+            except dart.DartError as rest_exc:
+                cache[ticker] = rest_exc
+            print(f"  MCP 실패 → REST 폴백 {ticker}: {str(exc)[:60]}")
         except dart.DartRateLimitError as exc:
             rate_limited += 1
             cache[ticker] = exc
         except dart.DartError as exc:
             cache[ticker] = exc
-        calls += 1
         if i % 25 == 0:
             print(f"  {i}/{len(by_ticker)} 종목 조회")
         time.sleep(args.pause)
@@ -122,7 +149,14 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 — 보고서 �
         f"# 드라이런 M1 — {today}",
         "",
         f"> 최근 {args.days}일 신호 {n}건 · {len(days)}거래일 · 하루 평균 {per_day:.1f}건"
-        f" · 종목 {len(by_ticker)}개 · DART 호출 {calls + 1}회 · 020 {rate_limited}회",
+        f" · 종목 {len(by_ticker)}개 · DART 호출 {calls + 1}회 · 020 {rate_limited}회"
+        f" · 경로 {args.source}"
+        + (f" · MCP 실패→폴백 {mcp_failed}건" if mcp_failed else "")
+        + (
+            f" · **불일치 {len(mismatch)}건**"
+            if mismatch
+            else (" · 불일치 0건" if args.source == "both" else "")
+        ),
         "",
         "## 등급 분포",
         "",
@@ -171,10 +205,15 @@ def main(argv: list[str] | None = None) -> int:  # noqa: PLR0915 — 보고서 �
             ", ".join(f"{n_} [{t}]" for t, n_ in unknown_names),
         ]
 
+    if mismatch:
+        lines += ["", "## MCP ≠ REST 불일치", "", "| 종목 | MCP | REST |", "|---|---|---|"]
+        lines += [f"| {t} | {m} | {r} |" for t, m, r in mismatch]
+
     out = config.PROJECT_ROOT / args.out
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n".join(lines[:10]))
     print(f"\n[out] {out.relative_to(config.PROJECT_ROOT)}")
+    mcpc.close_all()
     return 0
 
 

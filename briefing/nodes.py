@@ -17,7 +17,7 @@ from typing import Any
 
 from langgraph.types import Send
 
-from briefing import dart, flags, store
+from briefing import dart, enrich, store
 from briefing.models import WINDOW_DAYS, Briefing, RunRecord, SendResult
 from briefing.state import (
     FAILING_STATUSES,
@@ -101,6 +101,22 @@ def load_corps(state: BriefingState) -> dict[str, Any]:
     return {"corp_codes": {}}
 
 
+def load_market(state: BriefingState) -> dict[str, Any]:
+    """신호 종목의 시세 참고를 상위 DB에서 **SQL 한 번**으로 읽는다 (F12·D14 v2).
+
+    외부 호출도 새 키도 없다 — 상위 `krx-stock-charts`가 매일 `ksc_tickers.mktcap`을 채우고
+    (상위 F8), 거래대금은 `ksc_bars.a`에 이미 있다. 실패해도 raise하지 않는다 — 참고 층이다.
+    """
+    tickers = sorted({s.ticker for s in state.get("signals", [])})
+    try:
+        flows = store.fetch_flows(store.conn(), tickers)
+    except Exception as exc:  # noqa: BLE001 — 참고 층이 메일을 막지 않는다
+        print(f"[load_market] 시세 조회 실패 → 생략: {exc}")
+        return {"flows": {}, "flow_skipped": f"시세 조회 실패: {exc}"}
+    print(f"[load_market] 시세 참고 {len(flows)}/{len(tickers)}종목")
+    return {"flows": flows, "flow_skipped": "" if flows or not tickers else "상위 시총 데이터 없음"}
+
+
 def fan_out(state: BriefingState) -> list[Send] | str:
     """종목마다 `fetch_one`을 띄운다. 신호가 없으면 `summarize`로 직행한다.
 
@@ -110,6 +126,7 @@ def fan_out(state: BriefingState) -> list[Send] | str:
     if not signals:
         return "summarize"
     corps, existing = state.get("corp_codes", {}), state.get("existing", {})
+    flows, flow_skipped = state.get("flows", {}), bool(state.get("flow_skipped"))
     return [
         Send(
             "fetch_one",
@@ -119,6 +136,8 @@ def fan_out(state: BriefingState) -> list[Send] | str:
                 existing=existing.get(briefing_key(s.strategy, s.ticker)),
                 force=state["force"],
                 run_date=state["run_date"],
+                flow=flows.get(s.ticker),
+                flow_skipped=flow_skipped,
             ),
         )
         for s in signals
@@ -126,10 +145,11 @@ def fan_out(state: BriefingState) -> list[Send] | str:
 
 
 def fetch_one(item: FetchItem) -> dict[str, Any]:
-    """종목 하나 — 공시 조회(F4) → 판정(F5·F6) → Briefing. **실패해도 raise하지 않는다.**
+    """종목 하나 — ① 공시(MCP→REST 폴백) → ② 판정 → ③ 보조 신호(실패 시 생략) → Briefing.
 
-    그날 브리핑이 이미 있으면(`existing`) DART를 다시 부르지 않는다 (N6, `--force` 제외).
-    corp_code가 없으면 `unknown`, 조회가 실패하면 `error` — 한 종목 때문에 fan-out이 죽지 않는다.
+    **실패해도 raise하지 않는다.** 그날 브리핑이 이미 있으면(`existing`) 다시 부르지 않는다 (N6).
+    corp_code가 없으면 `unknown`, 공시를 어느 경로로도 못 받으면 `error` —
+    한 종목이 fan-out을 죽이지 않는다. 호출 순서·폴백·생략은 `enrich.py`에 있다 (N11).
     """
     s, code, end = item["signal"], item["corp_code"], item["run_date"]
     if item["existing"] is not None and not item["force"]:
@@ -137,13 +157,17 @@ def fetch_one(item: FetchItem) -> dict[str, Any]:
     if code is None:
         return {"briefings": [Briefing.from_signal(s, None, "unknown")], "dart_calls": 0}
     try:
-        raw = dart.fetch_disclosures(code, end - timedelta(days=WINDOW_DAYS), end)
+        b = enrich.briefing_for(
+            s,
+            code,
+            end - timedelta(days=WINDOW_DAYS),
+            end,
+            flow=item.get("flow"),
+            flow_skipped=item.get("flow_skipped", False),
+        )
     except dart.DartError as exc:
-        print(f"[fetch_one] {s.name} [{s.ticker}] 조회 실패: {exc}")
+        print(f"[fetch_one] {s.name} [{s.ticker}] 공시 조회 실패(MCP·REST): {exc}")
         b = Briefing.from_signal(s, code, "error", error=str(exc))
-        return {"briefings": [b], "dart_calls": 1}
-    v = flags.classify(raw, company_name=s.name)
-    b = Briefing.from_signal(s, code, v.level, flags=v.flags, disclosures=v.disclosures)
     return {"briefings": [b], "dart_calls": 1}
 
 

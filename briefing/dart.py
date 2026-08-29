@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import urllib.parse
-from datetime import date, datetime
+from datetime import date
 from time import sleep
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -146,13 +146,5 @@ def fetch_disclosures(corp_code: str, bgn: date, end: date) -> list[Disclosure]:
     total = int(payload.get("total_count", 0) or 0)
     if total > PAGE_COUNT:
         print(f"[dart] {corp_code} 공시 {total}건 — {PAGE_COUNT}건만 가져왔다")
-    return [_to_disclosure(x) for x in payload.get("list", [])]
-
-
-def _to_disclosure(x: dict[str, Any]) -> Disclosure:
-    return Disclosure(
-        rcept_dt=datetime.strptime(str(x["rcept_dt"]), "%Y%m%d").date(),
-        report_nm=str(x.get("report_nm", "")).strip(),
-        rcept_no=str(x["rcept_no"]),
-        flr_nm=str(x.get("flr_nm", "")).strip(),
-    )
+    # 매핑은 models에 한 곳 — MCP 경로(dart_mcp.py)와 같은 함수를 쓴다
+    return [Disclosure.from_dart_item(x) for x in payload.get("list", [])]

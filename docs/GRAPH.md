@@ -18,6 +18,7 @@ graph TD;
 	wait(wait)
 	load_signals(load_signals)
 	load_corps(load_corps)
+	load_market(load_market)
 	fetch_one(fetch_one)
 	summarize(summarize)
 	render(render)
@@ -32,8 +33,9 @@ graph TD;
 	gate -. &nbsp;timeout&nbsp; .-> record_run;
 	gate -. &nbsp;stale&nbsp; .-> render;
 	gate -. &nbsp;missing&nbsp; .-> wait;
-	load_corps -.-> fetch_one;
-	load_corps -.-> summarize;
+	load_corps --> load_market;
+	load_market -.-> fetch_one;
+	load_market -.-> summarize;
 	load_signals --> load_corps;
 	persist --> send_email;
 	record_run --> finalize;

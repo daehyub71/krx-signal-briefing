@@ -291,3 +291,70 @@ def test_sample_known_verdicts(sample_titles: list[str]) -> None:
         m = match(title)
         got = None if m is None else (m.rule, m.level)
         assert got == exp, f"{title}: {got} != {exp}"
+
+
+# ── 🟡 insider_sell_cluster — 제목이 아니라 insider_signal 입력으로 붙는 플래그 (F4b·D13 ③) ──
+
+from briefing.flags import INSIDER_RULE, insider_flag  # noqa: E402
+from briefing.models import Insider  # noqa: E402
+
+INSIDER_SAMPLES: dict[str, tuple[Insider, bool]] = {
+    "strong_sell": (
+        Insider(
+            signal="strong_sell_cluster",
+            sell_events=29,
+            unique_sellers=28,
+            net_change_shares=-16835,
+        ),
+        True,
+    ),
+    "sell": (Insider(signal="sell_cluster", sell_events=5, unique_sellers=3), True),
+    "buy": (Insider(signal="buy_cluster", buy_events=5, unique_buyers=3), False),
+    "strong_buy": (Insider(signal="strong_buy_cluster"), False),
+    "none": (Insider(signal="none"), False),
+}
+
+
+@pytest.mark.parametrize("key", list(INSIDER_SAMPLES))
+def test_insider_flag_only_for_sell_clusters(key: str) -> None:
+    insider, expected = INSIDER_SAMPLES[key]
+    f = insider_flag(insider)
+    if expected:
+        assert f is not None and f.rule == INSIDER_RULE and f.level == "amber"
+        assert f.rcept_no == "" and "매도" in f.report_nm
+    else:
+        assert f is None
+
+
+def test_insider_flag_report_nm_carries_evidence() -> None:
+    """점수가 아니라 근거 — 몇 명이 얼마나 팔았는지."""
+    f = insider_flag(
+        Insider(signal="sell_cluster", sell_events=29, unique_sellers=28, net_change_shares=-16835)
+    )
+    assert f is not None and "28명" in f.report_nm and "16,835주" in f.report_nm
+
+
+def test_classify_appends_insider_flag_and_raises_level_to_amber() -> None:
+    v = classify(
+        [disc("분기보고서 (2026.03)")],
+        company_name="가비아",
+        insider=Insider(signal="sell_cluster", sell_events=4, unique_sellers=3),
+    )
+    assert v.level == "amber" and [f.rule for f in v.flags] == [INSIDER_RULE]
+
+
+def test_classify_insider_does_not_lower_red() -> None:
+    v = classify(
+        [disc("주요사항보고서(전환사채권발행결정)")], insider=Insider(signal="sell_cluster")
+    )
+    assert v.level == "red" and [f.rule for f in v.flags] == ["cb", INSIDER_RULE]
+
+
+def test_classify_without_insider_unchanged() -> None:
+    v = classify([disc("분기보고서 (2026.03)")], insider=None)
+    assert v.level == "none" and v.flags == ()
+
+
+def test_insider_rule_is_not_a_title_rule() -> None:
+    """제목 규칙표(RULES)에는 없다 — 표본은 INSIDER_SAMPLES가 담당한다."""
+    assert INSIDER_RULE not in {r.id for r in RULES}

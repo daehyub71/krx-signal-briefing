@@ -46,7 +46,7 @@ def test_gate_ready_goes_through_full_path() -> None:
     log: list[str] = []
     out = run(wiring(log))
     assert log == [
-        "gate", "load_signals", "load_corps", "summarize", "render",
+        "gate", "load_signals", "load_corps", "load_market", "summarize", "render",
         "persist", "send_email", "record_run",
     ]
     assert out["status"] == STATUS_NO_SIGNALS  # 신호 0건 — "브리핑 없음"도 발송한다 (D8)

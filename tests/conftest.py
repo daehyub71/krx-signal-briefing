@@ -103,6 +103,7 @@ def wiring(log: list[str] | None = None, **custom: Node) -> dict[str, Node]:
         "wait": stub_wait(log),  # 실제 노드는 60초 잔다 — 테스트에서는 절대 부르지 않는다
         "load_signals": trace("load_signals", log, {"signals": [], "existing": {}}),
         "load_corps": trace("load_corps", log, {"corp_codes": {}}),
+        "load_market": trace("load_market", log, {"flows": {}, "flow_skipped": ""}),
         "fetch_one": stub_fetch_one(log),
         "summarize": trace("summarize", log, {"summaries": {}}),
         "render": trace("render", log, {"subject": "s", "text": "t", "html": "h"}),
