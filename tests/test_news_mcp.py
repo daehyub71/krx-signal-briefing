@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -134,3 +135,47 @@ def test_fetch_news_propagates_mcp_errors() -> None:
     """생략 판단은 호출자(enrich) 몫 — 여기서 삼키지 않는다."""
     with pytest.raises(McpCallError):
         fetch_news("가비아", server=FakeServer(McpCallError("타임아웃")))
+
+
+# ── 429 — 초당 제한 (일일 한도가 아니다) ─────────────────────────
+
+
+class FlakyServer:
+    """첫 호출은 429, 두 번째는 정상."""
+
+    def __init__(self, reply: Any) -> None:
+        self.reply, self.calls = reply, 0
+
+    def call_json(
+        self, tool: str, args: dict[str, Any] | None = None, *, timeout: float = 30.0
+    ) -> Any:
+        self.calls += 1
+        if self.calls == 1:
+            raise McpCallError("[naver] search_news 실패: [네이버 개발자센터] HTTP 429 — …")
+        return self.reply
+
+
+def test_rate_limit_is_retried_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    slept: list[float] = []
+    monkeypatch.setattr(time, "sleep", lambda s: slept.append(s))
+    srv = FlakyServer(SAMPLE)
+    items = fetch_news("가비아", server=srv)
+    assert len(items) == 5 and srv.calls == 2 and news_mcp.RETRY_WAIT in slept
+
+
+def test_other_call_errors_are_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    srv = FakeServer(McpCallError("타임아웃"))
+    with pytest.raises(McpCallError):
+        fetch_news("가비아", server=srv)
+    assert len(srv.calls) == 1
+
+
+def test_calls_are_paced(monkeypatch: pytest.MonkeyPatch) -> None:
+    """간격을 두지 않으면 fan-out 15종목이 초당 제한에 걸린다 (실측)."""
+    slept: list[float] = []
+    monkeypatch.setattr(time, "sleep", lambda s: slept.append(s))
+    monkeypatch.setattr(time, "monotonic", lambda: 100.0)  # 시간이 흐르지 않는다
+    news_mcp._last_call = 100.0
+    fetch_news("가비아", server=FakeServer(SAMPLE))
+    assert slept and slept[0] == pytest.approx(news_mcp.MIN_INTERVAL)

@@ -15,11 +15,17 @@ from datetime import date
 from typing import Any
 
 import psycopg
+from supabase import Client, create_client
 
 from briefing import config
-from briefing.models import Flow, SignalRow
+from briefing.models import Briefing, Disclosure, Flag, Flow, RunRecord, SignalRow
 
 _conn: psycopg.Connection[Any] | None = None
+
+
+def rest_client() -> Client:
+    """service_role 클라이언트 — RLS를 우회한다. `ksb_*` 쓰기에만 쓴다."""
+    return create_client(config.require("SUPABASE_URL"), config.require("SUPABASE_SERVICE_KEY"))
 
 
 def conn() -> psycopg.Connection[Any]:
@@ -148,7 +154,85 @@ def fetch_flows(
     }
 
 
+def fetch_signals(c: psycopg.Connection[Any], d: date) -> list[SignalRow]:
+    """그날 메일에 실린 신호 (F2).
+
+    `sent_email`은 상위가 저장하지 않는다 — 메일 집합은 `suppressed = false` 전체다
+    (2026-08-26 실측, SPEC F2). 순서는 상위 메일과 같게 전략·티커 순.
+    """
+    rows = c.execute(
+        "select d, strategy, ticker, name, evidence from ksa_signals"
+        " where d = %s and not suppressed order by strategy, ticker",
+        (d,),
+    ).fetchall()
+    return [
+        SignalRow(d=dd, strategy=str(st), ticker=str(t), name=str(n), evidence=ev or {})
+        for dd, st, t, n, ev in rows
+    ]
+
+
+# ── ksb_briefings ───────────────────────────────────────────────
+
+
+def fetch_briefings(c: psycopg.Connection[Any], d: date) -> dict[str, Briefing]:
+    """그날 이미 있는 브리핑 — 멱등 판단용 (N6). 키는 `briefing_key`와 같은 형식.
+
+    저장된 것을 그대로 되살리지는 않는다(공시 목록만 복원). 다시 부르지 않는 것이 목적이다.
+    """
+    rows = c.execute(
+        "select d, strategy, ticker, name, corp_code, level, flags, disclosures,"
+        " window_days, summary from ksb_briefings where d = %s",
+        (d,),
+    ).fetchall()
+    out: dict[str, Briefing] = {}
+    for dd, st, t, name, code, level, flags, discs, window, summ in rows:
+        out[f"{st}:{t}"] = Briefing(
+            d=dd,
+            strategy=str(st),
+            ticker=str(t),
+            name=str(name),
+            corp_code=code,
+            level=level,
+            flags=tuple(
+                Flag(
+                    rule=f["rule"],
+                    level=f["level"],
+                    rcept_no=f["rcept_no"],
+                    report_nm=f["report_nm"],
+                )
+                for f in flags or []
+            ),
+            disclosures=tuple(
+                Disclosure(
+                    rcept_dt=date.fromisoformat(x["rcept_dt"]),
+                    report_nm=x["report_nm"],
+                    rcept_no=x["rcept_no"],
+                    flr_nm=x.get("flr_nm", ""),
+                    corrected=bool(x.get("corrected", False)),
+                )
+                for x in discs or []
+            ),
+            window_days=int(window),
+            summary=summ,
+        )
+    return out
+
+
+def upsert_briefings(client: Client, briefings: Sequence[Briefing]) -> int:
+    """브리핑을 저장한다 (F9). PK 기준 upsert라 재실행해도 같은 결과다 (N6)."""
+    if not briefings:
+        return 0
+    rows = [b.to_row() for b in briefings]
+    client.table("ksb_briefings").upsert(rows).execute()
+    return len(rows)
+
+
 # ── ksb_runs ────────────────────────────────────────────────────
+
+
+def insert_run(client: Client, record: RunRecord) -> None:
+    """실행 기록을 남긴다. 실패해도 이것부터 쓴다 — 사후에 원인을 보는 유일한 기록이다."""
+    client.table("ksb_runs").insert(record.to_row()).execute()
 
 
 def briefed_today(c: psycopg.Connection[Any], run_date: date) -> bool:

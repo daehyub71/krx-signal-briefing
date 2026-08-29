@@ -261,6 +261,11 @@ class Briefing:
     insider: Insider | None = None  # F4b 보조 신호 (v2.0). None = 생략됨
     flow: Flow | None = None  # F12 시세 참고 (v2.0). None = 생략됨
     news: tuple[NewsItem, ...] = ()  # F11 뉴스 (등급 none인 종목만). 빈 튜플 = 없음·생략
+    # 아래 넷은 상위 evidence에서 그대로 온 표시용 값이다 (열이 아니다 — 렌더가 쓴다)
+    conditions: tuple[tuple[str, bool, str], ...] = ()
+    close: int = 0
+    change_pct: float = 0.0
+    in_progress: bool = False
     # 아래 셋은 열이 아니다 — 렌더 표기와 ksb_runs.detail 집계에 쓴다
     source: str = "mcp"  # 공시 출처: 'mcp' | 'rest'(폴백, D15)
     skipped: tuple[str, ...] = ()  # 생략된 보조 신호 이름 ('anomaly' · 'insider' · 'flow')
@@ -279,6 +284,7 @@ class Briefing:
         insider: Insider | None = None,
         flow: Flow | None = None,
         news: tuple[NewsItem, ...] = (),
+        summary: str | None = None,
         source: str = "mcp",
         skipped: tuple[str, ...] = (),
         error: str = "",
@@ -289,6 +295,10 @@ class Briefing:
             strategy=signal.strategy,
             ticker=signal.ticker,
             name=signal.name,
+            conditions=signal.conditions,
+            close=signal.close,
+            change_pct=signal.change_pct,
+            in_progress=signal.in_progress,
             corp_code=corp_code,
             level=level,
             flags=flags,
@@ -297,6 +307,7 @@ class Briefing:
             insider=insider,
             flow=flow,
             news=news,
+            summary=summary,
             source=source,
             skipped=skipped,
             error=error,
@@ -305,6 +316,14 @@ class Briefing:
     def link(self, rcept_no: str) -> str:
         """공시 원문 링크."""
         return dart_link(rcept_no)
+
+    def signal_line(self) -> str:
+        """종목 한 줄 — 상위 신호 메일과 같은 형태 (`가비아 [079940] 46,000원 +1.32%`)."""
+        head = f"{self.name} [{self.ticker}]"
+        if not self.close:
+            return head
+        mark = "(진행중)" if self.in_progress else ""
+        return f"{head} {self.close:,}원 {self.change_pct:+.2f}%{mark}"
 
     def to_row(self) -> dict[str, Any]:
         """`ksb_briefings` upsert 행 (F9). 열 이름이 배치와 DB의 계약이다."""

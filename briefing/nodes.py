@@ -17,7 +17,8 @@ from typing import Any
 
 from langgraph.types import Send
 
-from briefing import dart, enrich, store
+from briefing import corp, dart, enrich, notify, store
+from briefing import render as rendering
 from briefing.models import WINDOW_DAYS, Briefing, RunRecord, SendResult
 from briefing.state import (
     FAILING_STATUSES,
@@ -86,19 +87,26 @@ def wait(state: BriefingState) -> dict[str, Any]:
 
 
 def load_signals(state: BriefingState) -> dict[str, Any]:
-    """그날 메일에 실린 신호(`suppressed = false`)와 기존 브리핑을 읽는다.
-
-    TODO(M2): store 실구현.
-    """
-    return {"signals": [], "existing": {}}
+    """그날 메일에 실린 신호(`suppressed = false`)와 기존 브리핑을 읽는다 (F2·N6)."""
+    d = state.get("data_date") or state["run_date"]
+    c = store.conn()
+    signals = store.fetch_signals(c, d)
+    existing = store.fetch_briefings(c, d)
+    print(f"[load_signals] {d} 신호 {len(signals)}건 · 기존 브리핑 {len(existing)}건")
+    return {"signals": signals, "existing": existing}
 
 
 def load_corps(state: BriefingState) -> dict[str, Any]:
-    """`corpCode.xml` 1회 → {ticker: corp_code}.
-
-    TODO(M2): dart.fetch_corp_codes() + corp.parse().
-    """
-    return {"corp_codes": {}}
+    """`corpCode.xml` 1회 → {ticker: corp_code} (F3). 실패하면 전 종목이 `unknown`이 된다."""
+    if not state.get("signals"):
+        return {"corp_codes": {}}
+    try:
+        codes = corp.parse_corp_codes(dart.fetch_corp_codes())
+    except (dart.DartError, corp.CorpCodeError) as exc:
+        print(f"[load_corps] 실패 → 전 종목 코드 미확인: {exc}")
+        return {"corp_codes": {}}
+    print(f"[load_corps] 상장사 {len(codes):,}개")
+    return {"corp_codes": codes}
 
 
 def load_market(state: BriefingState) -> dict[str, Any]:
@@ -183,30 +191,54 @@ def summarize(state: BriefingState) -> dict[str, Any]:
 
 
 def render(state: BriefingState) -> dict[str, Any]:
-    """제목·평문·HTML을 만든다 (순수 함수 호출).
-
-    TODO(M2): render.subject()/text()/html().
-    """
-    return {"subject": "", "text": "", "html": ""}
+    """제목·평문·HTML을 만든다 (F7·F8). 순수 함수를 부를 뿐이다."""
+    briefings = _ordered(state)
+    d = state.get("data_date") or state["run_date"]
+    stale = state.get("gate") == GATE_STALE
+    err = state.get("summary_error", "")
+    return {
+        "subject": rendering.subject(briefings, d, stale=stale),
+        "text": rendering.text(briefings, d, stale=stale, summary_error=err),
+        "html": rendering.html(briefings, d, stale=stale, summary_error=err),
+    }
 
 
 # ── 저장 · 발송 · 기록 (F9 · F10) ───────────────────────────────
 
 
 def persist(state: BriefingState) -> dict[str, Any]:
-    """`ksb_briefings` upsert. dry-run이면 건너뛴다.
-
-    TODO(M2): store.upsert_briefings().
-    """
+    """`ksb_briefings` upsert (F9). dry-run이면 건너뛴다. 실패해도 발송은 시도한다."""
+    briefings = state.get("briefings", [])
+    if state.get("dry_run") or not briefings:
+        return {}
+    try:
+        n = store.upsert_briefings(store.rest_client(), briefings)
+        print(f"[persist] {n}건 저장")
+    except Exception as exc:  # noqa: BLE001 — 저장 실패가 메일을 막지 않는다
+        print(f"[persist] 저장 실패(무시): {exc}")
     return {}
 
 
 def send_email(state: BriefingState) -> dict[str, Any]:
-    """Gmail SMTP 발송. 예외를 밖으로 내지 않고 `SendResult`를 적는다.
+    """Gmail SMTP 발송 (F10). **예외를 밖으로 내지 않고** `SendResult`를 적는다."""
+    if state.get("dry_run"):
+        print(f"[send_email] dry-run — 보내지 않음. 제목: {state.get('subject', '')}")
+        return {"send": SendResult(ok=True, sent_n=0)}
+    try:
+        n = notify.send(state["subject"], state["text"], state["html"])
+        print(f"[send_email] {n}명에게 발송")
+        return {"send": SendResult(ok=True, sent_n=n)}
+    except Exception as exc:  # noqa: BLE001 — 실패 판정은 finalize 한 곳에서
+        print(f"[send_email] 발송 실패: {exc}")
+        return {"send": SendResult(ok=False, error=f"{type(exc).__name__}: {exc}")}
 
-    TODO(M2): notify.send(). dry-run이면 보내지 않는다.
-    """
-    return {"send": SendResult(ok=True, sent_n=0)}
+
+def _ordered(state: BriefingState) -> list[Briefing]:
+    """상위 메일과 같은 순서로 (전략·티커). fan-out은 완료 순서로 합쳐진다."""
+    order = {(s.strategy, s.ticker): i for i, s in enumerate(state.get("signals", []))}
+    return sorted(
+        state.get("briefings", []), key=lambda b: order.get((b.strategy, b.ticker), 10**6)
+    )
 
 
 def _status_of(state: BriefingState) -> str:
@@ -226,12 +258,17 @@ def _status_of(state: BriefingState) -> str:
 
 
 def record_run(state: BriefingState) -> dict[str, Any]:
-    """실행 결과를 `ksb_runs`에 남기고 최종 상태를 정한다. 실패해도 **기록이 먼저**다.
-
-    TODO(M2): store.insert_run(). 지금은 상태 판정까지만.
-    """
+    """실행 결과를 `ksb_runs`에 남기고 최종 상태를 정한다. 실패해도 **기록이 먼저**다."""
     status = _status_of(state)
     briefings = state.get("briefings", [])
+    send = state.get("send")
+    detail = enrich.run_detail(briefings)
+    if send is not None:
+        detail["send"] = {"ok": send.ok, "sent_n": send.sent_n, "error": send.error}
+    if err := state.get("summary_error", ""):
+        detail["summary_error"] = err
+    if skipped := state.get("flow_skipped", ""):
+        detail["flow_skipped"] = skipped
     record = RunRecord(
         data_date=state.get("data_date"),
         status=status,  # type: ignore[arg-type]
@@ -242,7 +279,13 @@ def record_run(state: BriefingState) -> dict[str, Any]:
         dart_calls=state.get("dart_calls", 0),
         summary_n=len(state.get("summaries", {})),
         llm_tokens=state.get("llm_tokens", 0),
+        detail=detail,
     )
+    if not state.get("dry_run"):
+        try:
+            store.insert_run(store.rest_client(), record)
+        except Exception as exc:  # noqa: BLE001 — 기록 실패가 알림을 삼키면 안 된다
+            print(f"[record_run] 기록 실패(무시): {exc}")
     print(f"[record_run] status={status} signals={record.signal_n} red={record.red_n}")
     return {"status": status}
 

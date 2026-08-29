@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import html
 import re
+import threading
+import time
 from datetime import date
 from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
@@ -30,6 +32,13 @@ TIMEOUT = 20.0
 DISPLAY = 5  # 종목당 최대 건수. 늘리면 요약 입력과 메일이 길어진다
 SORT = "date"  # 최신순 — 신호가 난 날 근처의 움직임을 본다
 QUERY_SUFFIX = "주가"  # 종목명만으로는 동음이의가 섞인다 (실측)
+
+# 네이버는 초당 호출을 제한한다 — fan-out 15종목이 몰리면 HTTP 429가 난다 (2026-08-29 실측).
+# 일일 한도(25,000)와는 다른 것이라 간격만 두면 해소된다.
+MIN_INTERVAL = 0.35
+RETRY_WAIT = 1.5
+_pace = threading.Lock()
+_last_call = 0.0
 
 _TAG = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\s+")
@@ -79,8 +88,30 @@ def query_for(company_name: str) -> str:
     return f"{company_name} {QUERY_SUFFIX}".strip()
 
 
+def _wait_turn() -> None:
+    """호출 간 최소 간격을 둔다. fan-out 스레드가 몰려도 초당 제한에 걸리지 않게."""
+    global _last_call
+    with _pace:
+        gap = time.monotonic() - _last_call
+        if gap < MIN_INTERVAL:
+            time.sleep(MIN_INTERVAL - gap)
+        _last_call = time.monotonic()
+
+
 def fetch_news(company_name: str, *, server: _Server | None = None) -> list[NewsItem]:
-    """종목의 최신 뉴스 최대 `DISPLAY`건. 실패는 `mcpc.McpError`로 올린다 (호출자가 생략)."""
+    """종목의 최신 뉴스 최대 `DISPLAY`건. 실패는 `mcpc.McpError`로 올린다 (호출자가 생략).
+
+    HTTP 429(초당 제한)면 한 번 쉬었다 다시 부른다 — 일일 한도가 아니라 속도 문제다.
+    """
     srv = server or mcpc.get("naver")
     args = {"query": query_for(company_name), "display": DISPLAY, "sort": SORT}
-    return parse_news(srv.call_json("search_news", args, timeout=TIMEOUT))
+    _wait_turn()
+    try:
+        return parse_news(srv.call_json("search_news", args, timeout=TIMEOUT))
+    except mcpc.McpCallError as exc:
+        if "429" not in str(exc):
+            raise
+        print(f"[news] {company_name} 429 — {RETRY_WAIT}초 후 재시도")
+        time.sleep(RETRY_WAIT)
+        _wait_turn()
+        return parse_news(srv.call_json("search_news", args, timeout=TIMEOUT))
