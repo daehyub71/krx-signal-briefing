@@ -113,10 +113,10 @@ pytest tests/ -v    # 3. 테스트
 
 ## 진행 상태
 
-**M0 완료** (2026-08-26) · M1(DART 계층) 대기. 진도는 `docs/TASKS.md` 대시보드 참조.
+**M1 9/10** (2026-08-29) — 🔴 13건 손검증 대기 · **SPEC v2.0(MCP 3종) 검토 중**, D12·D13·D15 확정 후 M1b. 진도는 `docs/TASKS.md` 대시보드 참조.
 
 | 항목 | 값 |
 |------|-----|
 | 저장소 | `daehyub71/krx-signal-briefing` (**public**) |
-| 테스트 | 51 · ruff · mypy strict 통과 · CI 녹색 |
+| 테스트 | 171 · ruff · mypy strict 통과 · CI 녹색 |
 | DB | `ksb_briefings` · `ksb_runs` 생성, RLS 확인 |
