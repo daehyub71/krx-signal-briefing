@@ -17,6 +17,7 @@ from typing import Any
 import psycopg
 
 from briefing import config
+from briefing.models import SignalRow
 
 _conn: psycopg.Connection[Any] | None = None
 
@@ -66,6 +67,40 @@ def fetch_today_run(c: psycopg.Connection[Any], run_date: date) -> tuple[date | 
         (run_date,),
     ).fetchone()
     return (row[0], str(row[1])) if row else None
+
+
+def fetch_signal_tickers_since(
+    c: psycopg.Connection[Any], since: date
+) -> list[tuple[str, str]]:
+    """일정 기간의 신호 종목(억제 제외) — 표본 수집·드라이런용.
+
+    Args:
+        c: DB 연결.
+        since: 이 날짜 이후의 신호.
+
+    Returns:
+        `(ticker, name)` 중복 없이, 티커 순.
+    """
+    rows = c.execute(
+        "select distinct ticker, name from ksa_signals"
+        " where d >= %s and not suppressed order by ticker",
+        (since,),
+    ).fetchall()
+    return [(str(t), str(n)) for t, n in rows]
+
+
+def fetch_signal_rows_since(c: psycopg.Connection[Any], since: date) -> list[SignalRow]:
+    """일정 기간의 신호 행(억제 제외) — 드라이런용. `evidence`는 싣지 않는다.
+
+    Returns:
+        `(d, ticker)` 순. 같은 종목이 여러 날·여러 전략에 나올 수 있다.
+    """
+    rows = c.execute(
+        "select d, strategy, ticker, name from ksa_signals"
+        " where d >= %s and not suppressed order by d, ticker",
+        (since,),
+    ).fetchall()
+    return [SignalRow(d=d, strategy=str(s), ticker=str(t), name=str(n)) for d, s, t, n in rows]
 
 
 # ── ksb_runs ────────────────────────────────────────────────────

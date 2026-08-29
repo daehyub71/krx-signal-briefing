@@ -141,6 +141,30 @@ class Briefing:
     summary: str | None = None
     error: str = ""  # level == 'error'일 때 원인. 열이 아니라 ksb_runs.detail로 간다
 
+    @classmethod
+    def from_signal(
+        cls,
+        signal: SignalRow,
+        corp_code: str | None,
+        level: Level,
+        *,
+        flags: tuple[Flag, ...] = (),
+        disclosures: tuple[Disclosure, ...] = (),
+        error: str = "",
+    ) -> Briefing:
+        """신호 행에서 브리핑을 만든다 — 키·이름은 신호에서 그대로 온다."""
+        return cls(
+            d=signal.d,
+            strategy=signal.strategy,
+            ticker=signal.ticker,
+            name=signal.name,
+            corp_code=corp_code,
+            level=level,
+            flags=flags,
+            disclosures=disclosures,
+            error=error,
+        )
+
     def link(self, rcept_no: str) -> str:
         """공시 원문 링크."""
         return dart_link(rcept_no)

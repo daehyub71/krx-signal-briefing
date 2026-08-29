@@ -52,6 +52,7 @@ class FetchItem(TypedDict):
     corp_code: str | None
     existing: Briefing | None
     force: bool
+    run_date: date  # 조회 창의 끝 (F4: bgn = run_date − 30, end = run_date)
 
 
 class BriefingState(TypedDict, total=False):

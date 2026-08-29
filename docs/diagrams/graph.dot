@@ -1,6 +1,6 @@
 digraph briefing {
   graph [fontname="Apple SD Gothic Neo", fontsize=13, rankdir=TB, nodesep=0.45, ranksep=0.5, pad=0.4, bgcolor="white",
-         label="krx-signal-briefing — LangGraph 그래프 (PLAN §1-1 · SPEC D10)", labelloc=t, labeljust=l];
+         label="krx-signal-briefing — LangGraph 그래프 v2.0 (PLAN §1-1·§1-3 · SPEC D10·D12~D15)", labelloc=t, labeljust=l];
   node  [fontname="Apple SD Gothic Neo", fontsize=12, shape=box, style="rounded,filled", fillcolor="#F4F6FA", color="#3D465F", penwidth=1.2, margin="0.18,0.08"];
   edge  [fontname="Apple SD Gothic Neo", fontsize=10, color="#3D465F", arrowsize=0.8];
 
@@ -17,11 +17,11 @@ digraph briefing {
   load_corps   [label=<<b>load_corps</b><br/><font point-size="10">F3 · corpCode.xml 1회 → {ticker: corp_code}</font>>, fillcolor="#FFF4E0"];
 
   // fan-out
-  fetch_one    [label=<<b>fetch_one × N</b>  <font point-size="10">(종목당 Send)</font><br/><font point-size="10">F4 list.json 1회 → F5 판정 → F6 리츠 예외 → Briefing<br/>조회 실패는 level='error'로 반환 · raise 안 함</font>>, fillcolor="#FFF4E0", peripheries=2];
+  fetch_one    [label=<<b>fetch_one × N</b>  <font point-size="10">(종목당 Send · 20줄 · raise 안 함)</font><br/><font point-size="10">① 공시  korean-dart-mcp search_disclosures 30일 → 실패 시 REST 폴백(D15)<br/>② 판정  flags.classify — 규칙표(F5) · 자회사·리츠 강등<br/>③ 보조  disclosure_anomaly 점수 · insider_signal 매도 군집 · korea-stock-mcp 시총·거래대금 → 실패 시 생략<br/>④ 뉴스  등급 none만 naver-search-mcp search_news 5건 → 실패 시 생략</font>>, fillcolor="#FFF4E0", peripheries=2];
   join         [shape=point, width=0.12, fillcolor="#3D465F", color="#3D465F"];
 
   // LLM
-  summarize    [label=<<b>summarize</b><br/><font point-size="10">F14 · Claude Opus 5 1회 일괄 · 예외 불투과<br/>실패·키 없음 → summary_error</font>>, fillcolor="#E8F0FB"];
+  summarize    [label=<<b>summarize</b><br/><font point-size="10">F14 · Claude Opus 5 1회 일괄 · 예외 불투과<br/>입력 = 공시 제목·등급 + 보조 신호 + 뉴스 제목 (도구 없음, N14)<br/>실패·키 없음 → summary_error</font>>, fillcolor="#E8F0FB"];
 
   // 순수
   render       [label=<<b>render</b><br/><font point-size="10">F7·F8 · 순수 함수 (subject · text · html)</font>>, fillcolor="#EAF7EC"];
@@ -51,6 +51,10 @@ digraph briefing {
   send_email -> record_run;
   record_run -> finalize;
   finalize -> END;
+
+  mcp_note [shape=note, fillcolor="#F3F0FA", color="#9C8AD1", fontsize=10,
+            label="MCP 세션은 그래프 밖(main)에서 배치당 1회 열고 닫는다 — mcpc.py\nfan-out N개가 세션 하나를 공유(락). 그래프는 MCP를 모른다."];
+  load_corps -> mcp_note [style=invis];
 
   // 범례
   subgraph cluster_legend {

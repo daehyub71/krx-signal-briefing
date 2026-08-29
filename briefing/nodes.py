@@ -12,12 +12,13 @@ M0 단계: 배선을 먼저 세운다. `TODO(M*)`가 붙은 노드는 통과 스
 from __future__ import annotations
 
 import time
+from datetime import timedelta
 from typing import Any
 
 from langgraph.types import Send
 
-from briefing import store
-from briefing.models import Briefing, RunRecord, SendResult
+from briefing import dart, flags, store
+from briefing.models import WINDOW_DAYS, Briefing, RunRecord, SendResult
 from briefing.state import (
     FAILING_STATUSES,
     GATE_MISSING,
@@ -108,7 +109,7 @@ def fan_out(state: BriefingState) -> list[Send] | str:
     signals = state.get("signals", [])
     if not signals:
         return "summarize"
-    corps, existing, force = state.get("corp_codes", {}), state.get("existing", {}), state["force"]
+    corps, existing = state.get("corp_codes", {}), state.get("existing", {})
     return [
         Send(
             "fetch_one",
@@ -116,7 +117,8 @@ def fan_out(state: BriefingState) -> list[Send] | str:
                 signal=s,
                 corp_code=corps.get(s.ticker),
                 existing=existing.get(briefing_key(s.strategy, s.ticker)),
-                force=force,
+                force=state["force"],
+                run_date=state["run_date"],
             ),
         )
         for s in signals
@@ -124,16 +126,25 @@ def fan_out(state: BriefingState) -> list[Send] | str:
 
 
 def fetch_one(item: FetchItem) -> dict[str, Any]:
-    """종목 하나 — 공시 조회(F4) → 판정(F5·F6) → Briefing. 실패해도 raise하지 않는다.
+    """종목 하나 — 공시 조회(F4) → 판정(F5·F6) → Briefing. **실패해도 raise하지 않는다.**
 
-    TODO(M1): dart.fetch_disclosures() + flags.classify(). 지금은 `unknown` 스텁.
+    그날 브리핑이 이미 있으면(`existing`) DART를 다시 부르지 않는다 (N6, `--force` 제외).
+    corp_code가 없으면 `unknown`, 조회가 실패하면 `error` — 한 종목 때문에 fan-out이 죽지 않는다.
     """
-    s = item["signal"]
-    b = Briefing(
-        d=s.d, strategy=s.strategy, ticker=s.ticker, name=s.name,
-        corp_code=item["corp_code"], level="unknown",
-    )
-    return {"briefings": [b], "dart_calls": 0}
+    s, code, end = item["signal"], item["corp_code"], item["run_date"]
+    if item["existing"] is not None and not item["force"]:
+        return {"briefings": [item["existing"]], "dart_calls": 0}
+    if code is None:
+        return {"briefings": [Briefing.from_signal(s, None, "unknown")], "dart_calls": 0}
+    try:
+        raw = dart.fetch_disclosures(code, end - timedelta(days=WINDOW_DAYS), end)
+    except dart.DartError as exc:
+        print(f"[fetch_one] {s.name} [{s.ticker}] 조회 실패: {exc}")
+        b = Briefing.from_signal(s, code, "error", error=str(exc))
+        return {"briefings": [b], "dart_calls": 1}
+    v = flags.classify(raw, company_name=s.name)
+    b = Briefing.from_signal(s, code, v.level, flags=v.flags, disclosures=v.disclosures)
+    return {"briefings": [b], "dart_calls": 1}
 
 
 # ── 요약 · 본문 (F14 · F7·F8) ───────────────────────────────────

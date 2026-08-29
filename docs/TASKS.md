@@ -11,12 +11,14 @@
 | 마일스톤 | 진도 | % | 태스크 | 상태 |
 |----------|------|---|--------|------|
 | M0 뼈대 + 걷는 해골 | `██████████` | 100% | 12/12 | ✅ 2026-08-26 |
-| M1 DART 계층 ★ TDD | `░░░░░░░░░░` | 0% | 0/10 | 🔜 다음 |
+| M1 DART 계층 ★ TDD | `█████████░` | 90% | 9/10 | 🔄 🔴 손검증 대기 |
+| **M1b MCP 계층** (v2.0) | `░░░░░░░░░░` | 0% | 0/10 | 🔜 D12·D13·D15 확정 대기 |
+| **M1c 뉴스** (v2.0) | `░░░░░░░░░░` | 0% | 0/5 | 🔜 |
 | M2 본문·저장·발송 | `░░░░░░░░░░` | 0% | 0/9 | 🔜 |
 | M3 Claude 요약 | `░░░░░░░░░░` | 0% | 0/8 | 🔜 |
 | M4 자동화·배포 | `░░░░░░░░░░` | 0% | 0/11 | 🔜 |
 | M5 마무리 | `░░░░░░░░░░` | 0% | 0/5 | 🔜 |
-| **전체** | `██░░░░░░░░` | **22%** | **12/55** | 🔄 M1 대기 |
+| **전체** | `███░░░░░░░` | **30%** | **21/70** | 🔄 M1 |
 
 범례: 🔜 대기 · 🔄 진행중 · ✅완료일
 
@@ -27,6 +29,9 @@
 | M0 전 | OpenDART 인증키 (opendart.fss.or.kr, 무료·즉시) → `.env` `DART_API_KEY` | ✅ 2026-08-26 연결 확인 |
 | M0 전 | 깃허브 리포 `krx-signal-briefing` 생성 (public) | ✅ 2026-08-26 첫 푸시 |
 | M3 전 | Anthropic API 키 → `.env` `ANTHROPIC_API_KEY` | ✅ 2026-08-26 연결 확인 |
+| **M1b 전** | **D12·D13·D15 확정** (SPEC §2-3). D14는 ✅ 포함 확정(2026-08-29) | ⏳ |
+| **M1b 전** | **KRX OPEN API 키** (`KRX_API_KEY`, data.krx.co.kr 등록·승인 ~1일) — korea-stock-mcp용 | ⏳ |
+| **M1c 전** | **네이버 NCP API HUB 키** (`NCP_APIGW_API_KEY_ID` / `NCP_APIGW_API_KEY`) | ⏳ |
 | M4 | fine-grained PAT (대상 `krx-signal-briefing` 1개 · Contents write · 1년) → 상위 리포 Secrets `BRIEFING_DISPATCH_TOKEN` | ⏳ |
 | M4 | 이 리포 Secrets 8종 등록 | ⏳ |
 
@@ -68,20 +73,51 @@
 
 > 규칙표(SPEC F5)는 **초안**이다. 실제 `report_nm` 표본으로 대조한 뒤 확정한다. **키워드 하나를 지워도 테스트가 통과하면 그 규칙은 검증되지 않은 것이다.**
 
-- [ ] `tests/fixtures/corpcode_sample.xml` — 정상 · `stock_code` 공백(비상장) · 중복 corp 케이스
-- [ ] `briefing/corp.py` TDD — zip 바이트 → `{stock_code: corp_code}` (`zipfile` · `xml.etree`)
-- [ ] `briefing/dart.py` — `urlopen` mock 테스트: `000` · **`013`=0건 정상** · `020`=한도 · 5xx · 타임아웃 · 1회 재시도 · **로그·예외 메시지에 키가 없다**(N7)
-- [ ] `scripts/sample_reports.py` — 최근 60거래일 `ksa_signals` 종목의 실제 `report_nm` 수집 → `tests/fixtures/report_names.txt`
-- [ ] `briefing/flags.py` — `normalize()` TDD: 공백 · `ㆍ` · 괄호 · `[정정]`/`[기재정정]` 접두 제거 + `corrected` 표시
-- [ ] `briefing/flags.py` — 규칙표 + `classify()` TDD: **규칙당 양성 1 + 음성 1** · 등급 최댓값 · `none`/`unknown`/`error`
-- [ ] `briefing/flags.py` — 리츠 예외(D9) TDD: 이름에 `리츠` + 유상증자결정 → 🟡 · 리츠가 아니면 🔴
-- [ ] `fetch_one` 노드 실구현 — `existing` 있고 `--force` 아니면 DART 생략 · 실패 시 `level='error'` 반환(raise 금지) · 20줄 이내
-- [ ] `scripts/dryrun.py` — 60거래일 신호 × DART 판정(발송·저장·LLM 없음) → 등급 분포 · `unknown` 비율 · 일 호출 수 · 020 발생 여부 → 「측정 기록」
+- [x] `tests/fixtures/corpcode_sample.xml` — 정상 · 공백/개행 · 문자 티커 · 비상장 3형(공백 한 칸·빈 태그·태그 없음) · 중복 2형(다른 corp_code → 최신 modify_date · 완전 동일) + `corpcode_error_800.xml`(점검 응답 원문) — **실파일 대조는 미해소 이슈 ⑥**
+- [x] `briefing/corp.py` TDD — zip 바이트 → `{stock_code: corp_code}` (`zipfile` · `xml.etree`) · `PK` 매직으로 오류 본문(800) 가려냄 · 중복은 `modify_date` 최신 우선(순서 무관) · 테스트 12개
+- [x] `briefing/dart.py` — `urlopen` mock 테스트: `000` · **`013`=0건 정상** · `020`=한도 · `800`=점검 · 5xx · 타임아웃 · 1회 재시도(키 오류 010/011은 재시도 없음) · **예외 메시지·stdout에 키가 없다**(N7, `mask()`) · `total_count>100` 경고 · 테스트 16개
+- [x] `scripts/sample_reports.py` — 최근 90일(≈60거래일) 신호 종목 **153개** × 120일 창 → `report_names.txt`(**352종 · 3,000건**) + `list_sample.json` · `store.fetch_signal_tickers_since()` · **corpCode.xml 실파일 대조 완료**(미해소 ⑥ 해소) — 2026-08-29
+- [x] `briefing/flags.py` — `normalize()` TDD: 접두 `[…]` 전부 제거(`정정` 계열만 `corrected`) · 공백 제거 · `ㆍ`→`·` · **괄호는 유지**(래퍼 안 키워드) · 뒤 `  (설명)`을 `note`로 분리 — 테스트 15개
+- [x] `briefing/flags.py` — 규칙표 20개(🔴 12 · 🟡 8) + `match()`/`classify()` TDD: **규칙당 양성 1 + 헷갈리는 음성 1**(표본 실제 제목) · 표본 없는 규칙은 테스트 실패 · 자회사 강등 · 등급 최댓값 · `none` · 실표본 352종 회귀 — 테스트 60여 개
+- [x] `briefing/flags.py` — 리츠 예외(D9) TDD: 이름에 `리츠` + 유상증자결정 → 🟡 · 리츠가 아니면 🔴 · 리츠라도 CB는 🔴
+- [x] `fetch_one` 노드 실구현 — `existing` 있고 `--force` 아니면 DART 생략 · corp_code 없으면 `unknown` · 실패 시 `level='error'`(raise 금지) · 창 `[run_date−30, run_date]`(`FetchItem.run_date` 추가) · **13줄** (20줄 테스트로 고정) · `Briefing.from_signal()` — 테스트 7개
+- [x] `scripts/dryrun.py` — 신호 × DART 판정(종목당 1회 조회 후 30일 창으로 절단) → `docs/dryrun_m1.md`(등급 분포 · 전략별 · 규칙별 · 🔴 전 건 원문 링크). **상위 데이터가 9거래일뿐**(08/17 배포)이라 60거래일은 불가 — 165건으로 측정 (아래 「측정 기록」)
 - [ ] **SPEC F5 규칙표 확정** — 표본 대조 결과로 키워드 추가·삭제, 변경 일자·근거를 SPEC에 기록 · 🔴 표본 전 건 원문 링크 손검증
 
 **완료 기준**
 - 규칙표가 실데이터 표본과 대조됨 · 드라이런 분포 합리적(전부 🔴도 전부 `none`도 아님) · 일 호출 < 100회
 - 15건 동시 `Send`에서 `020`이 없음 — 있으면 순차/`max_concurrency`로 전환하고 PLAN §7에 기록
+
+---
+
+## M1b — MCP 계층 (v2.0 · SPEC §2-3)
+
+> **MCP 서버는 데이터 소스다** (N14). 도구 순서는 코드가 정하고 LLM에는 도구를 주지 않는다. 응답은 표본 JSON으로 mock, 실제 Node 기동은 CI 통합에서만.
+
+- [ ] `requirements.txt`에 `mcp` 추가(사용자 확인 후) · 로컬 `npx -y korean-dart-mcp@<ver>` 기동 확인 · 버전 고정값 결정
+- [ ] `briefing/mcpc.py` — stdio 세션 1회 · `call(tool, args, timeout=30)` · 스레드 락 · 실패 예외 · **stdout 오염 시 실패 격리**(R18)
+- [ ] `tests/fixtures/mcp_search_disclosures.json` · `mcp_anomaly.json` · `mcp_insider.json` — 실제 응답 표본 수집
+- [ ] `briefing/dart_mcp.py` — 응답 → `Disclosure` / `{score, verdict}` / 군집 종류. 계약 테스트 · **REST(`dart.py`)와 같은 종목·같은 창의 공시 목록이 일치**하는 테스트
+- [ ] `flags.py` — 🟡 `insider_sell_cluster` 규칙 + SAMPLES
+- [ ] `schema.sql` — `ksb_briefings.anomaly jsonb` 추가(`alter table … add column if not exists`) · `Briefing.anomaly` · `to_row()`
+- [ ] `fetch_one` 재구성 — MCP 공시 → 폴백 → 판정 → 보조 신호 생략 표기 · 20줄 유지 · 테스트(폴백 경로 · 보조 실패 경로)
+- [ ] `tests/fixtures/mcp_stock_trade.json` 표본 · `briefing/stock_mcp.py` — korea-stock-mcp `get_stock_trade_info` → `{mktcap, list_shrs, trdval_5d}` · 응답에 시총·상장주식수가 있는지 **실표본으로 확인**(없으면 SPEC F12 수정) · 계약 테스트
+- [ ] `fetch_one` ③에 시세 참고 추가 · `ksb_briefings.flow` 저장 · 키 없음·실패 시 생략 + `⚠ 시세 참고 생략` 테스트
+- [ ] CI `setup-node`(20.19) + npm·`~/.korean-dart-mcp` 캐시 · **MCP 3종 기동 시간 측정** · 드라이런 MCP 경로 vs REST 경로 대조 → 「측정 기록」
+
+**완료 기준**: MCP·REST 공시 목록 일치 · 서버를 죽여도 폴백으로 완주 · CI 기동 < 60초
+
+---
+
+## M1c — 뉴스 (v2.0 · F11)
+
+- [ ] 네이버 키 `.env`·Secrets · `npx -y @isnow890/naver-search-mcp@<ver>` 기동 확인
+- [ ] `tests/fixtures/mcp_news.json` 표본 · `briefing/news_mcp.py` — `search_news` → `NewsItem` · HTML 태그·엔티티 제거 · 계약 테스트
+- [ ] `fetch_one` ④ — 등급 `none`만 · 실패 시 생략 · `ksb_briefings.news` 저장
+- [ ] `render` 📰 블록 · `⚠ 뉴스 생략` · 금지어 검사에서 뉴스 제목 원문 예외 · `summary` 입력에 뉴스 제목
+- [ ] 키 없이 실행 → 메일 도착 · `none` 종목 뉴스 메일 1통 손검증
+
+**완료 기준**: 위 둘 + 검증 3종
 
 ---
 
@@ -154,7 +190,11 @@
 
 | 항목 | 값 | 일자 |
 |------|-----|------|
-| M1 드라이런 — 60거래일 신호 건수 / 등급 분포(🔴·🟡·none·unknown·error) | — | |
+| M1 표본 — 신호 종목 153개(90일) × 120일 창 → `report_nm` 352종 · 3,000건 · DART 154회 | 최다: 임원ㆍ주요주주특정증권등소유상황보고서 506 · 대량보유(일반) 160 · 분기보고서 149. 규칙 관련: `[기재정정]주요사항보고서(유상증자결정)` 21 · `주요사항보고서(유상증자결정)` 8 · `유상증자결정(종속회사의주요경영사항)` 7 · `[기재정정]주요사항보고서(전환사채권발행결정)` 15 · 최대주주변경 1 · `기타시장안내(관리종목지정우려종목)` 2 · `불성실공시법인지정예고` 2 | 2026-08-29 |
+| M1 표본 — 접두 분포 | `[기재정정]` 432 · `[첨부정정]` 25 · `[발행조건확정]` 6 · `[첨부추가]` 5 · `[정정제출요구]` 2 | 2026-08-29 |
+| M1 표본 — 120일 창에서 100건 초과 종목 | 1개(corp 00162461, 186건) — 30일 창에서는 재확인 | 2026-08-29 |
+| M1 드라이런 (2026-08-29) — 최근 90일 신호 **165건 · 9거래일 · 하루 18.3건** · 153종목 · DART 154회 · 020 **0회** | 🔴 13 (8%) · 🟡 13 (8%) · none 139 (84%) · unknown **0** · error 0. 전략별: VCP 97(🔴9·🟡9) · MTF 66(🔴3·🟡4) · 눌림목 2(🔴1). 규칙별 플래그: cb 10 · rights_issue 8 · treasury_sale 7 · lawsuit 6 · controller_change 4 · admin_warning 2 · rights_issue(자회사) 2. 하루 예상 호출 ≈ 19회 | 2026-08-29 |
+| M1 드라이런 — 눈에 띈 것 | ① 같은 CB 결정이 원문 + `[기재정정]` ×2로 3~4줄 (엔투텍·빛과전자) → M2 렌더에서 정정 묶음 표시 검토 ② 최대주주변경은 `최대주주변경` + `…변동신고서(최대주주변경시)` 두 제목이 짝으로 옴 (한화갤러리아·SK이터닉스) | 2026-08-29 |
 | M1 — 하루 DART 호출 수 · `020` 발생 여부 | — | |
 | M1 — 규칙표 변경 내역(추가·삭제 키워드) | — | |
 | M3 — 요약 1회 입력/출력 토큰 · 비용 | — | |
@@ -169,6 +209,7 @@
 
 | # | 증상 | 원인 | 해결 |
 |---|------|------|------|
+| 2 | `corpCode.xml`이 175바이트, `BadZipFile` (2026-08-29 토 10:39) | **DART 시스템 점검** — HTTP 200으로 `<status>800</status>` XML을 준다. zip이 아니다 | `dart.py`는 `PK` 매직 바이트/`<status>`로 오류 본문을 먼저 가려낸다. 응답 원문을 `tests/fixtures/corpcode_error_800.xml`로 보관. 토요일 오전 점검이라 평일 08:45 실행과는 무관해 보이나, 평일 점검 여부는 미해소 이슈 ⑥ |
 | 1 | 08/25 신호 44건인데 `sent_email=true`가 0건 (2026-08-26 연결 테스트) | 상위 배치가 `sent_email` 열을 저장하지 않는다 — 카카오 상위 10건만 `sent_kakao=true`. 메일 발송 집합은 `suppressed=false` 전체(15건 = `ksa_runs.sent_email_n`) | SPEC F2를 `suppressed = false`로 변경(v1.1.1). 코드에서 `sent_email`을 쓰지 않는다 |
 
 ### 미리 알고 있는 함정 (상위·선행 프로젝트에서 확인됨)
@@ -197,3 +238,4 @@
 | ③ | 30일 창 밖·보고서 본문 안의 위험은 못 본다 — 문구로 한계를 드러낸다 (SPEC R2). `window_days`로 뒤에 조정 가능 | 의도된 선택 |
 | ④ | 15건 동시 DART 요청 허용 여부 미확인 | M1 드라이런에서 확인 |
 | ⑤ | 지주·홀딩스 예외 규칙 없음 (D9) — 드라이런에서 오탐 보이면 추가 | M1에서 관찰 |
+| ⑥ | ~~`corpcode_sample.xml` 실파일 대조~~ → **해소 (2026-08-29 10:55)**: 118,804건 · 상장 3,988 · 비상장 `' '` · 중복 0 · 문자 티커 58. 토요일 오전 점검(`800`)은 10:39~10:5x 사이에 끝났다. 평일 08:45 점검 여부는 M4 관찰에 포함 | ✅ |

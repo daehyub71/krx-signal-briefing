@@ -23,6 +23,9 @@ class FakeConn:
     def fetchone(self) -> tuple[Any, ...] | None:
         return self.rows[0] if self.rows else None
 
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return list(self.rows)
+
 
 def test_briefed_today_true_when_row_exists() -> None:
     c = FakeConn([(True,)])
@@ -50,3 +53,18 @@ def test_fetch_today_run_returns_data_date_and_status() -> None:
 
 def test_fetch_today_run_none_when_absent() -> None:
     assert store.fetch_today_run(FakeConn([]), date(2026, 8, 26)) is None  # type: ignore[arg-type]
+
+
+def test_fetch_signal_tickers_since_returns_distinct_pairs() -> None:
+    c = FakeConn([("079940", "가비아"), ("222040", "코스맥스엔비티")])
+    out = store.fetch_signal_tickers_since(c, date(2026, 6, 1))  # type: ignore[arg-type]
+    assert out == [("079940", "가비아"), ("222040", "코스맥스엔비티")]
+    assert "ksa_signals" in c.sql and "distinct" in c.sql.lower() and "suppressed" in c.sql
+    assert c.params == (date(2026, 6, 1),)
+
+
+def test_fetch_signal_rows_since_builds_signal_rows() -> None:
+    c = FakeConn([(date(2026, 8, 25), "mtf", "079940", "가비아")])
+    out = store.fetch_signal_rows_since(c, date(2026, 6, 1))  # type: ignore[arg-type]
+    assert len(out) == 1 and out[0].ticker == "079940" and out[0].strategy == "mtf"
+    assert out[0].evidence == {} and "not suppressed" in c.sql

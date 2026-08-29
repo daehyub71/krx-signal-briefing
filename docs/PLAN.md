@@ -139,6 +139,22 @@ class BriefingState(TypedDict, total=False):
 
 ---
 
+### 1-3. v2.0 — MCP 계층 (SPEC §2-3, 확정 대기)
+
+```
+fetch_one (종목당 Send)                              ← 구조는 그대로, 안에서 부르는 것이 바뀐다
+  ① 공시   dart_mcp.search_disclosures(corp_code, 30)   실패 → dart.fetch_disclosures() REST 폴백 (D15)
+  ② 판정   flags.classify()                              변경 없음 — 규칙표가 등급을 정한다
+  ③ 보조   dart_mcp.anomaly() · dart_mcp.insider()       실패 → 생략 (있으면 좋은 층)
+           stock_mcp.trade_info(ticker)                   시총·상장주식수·5일 거래대금 (D14) · 실패 → 생략
+  ④ 뉴스   news_mcp.search_news(name, 5)                 등급 none일 때만 · 실패 → 생략
+```
+
+- **MCP 세션은 배치당 1회** 연다 — `mcpc.py`가 `npx -y <pkg>@<ver>`를 stdio로 띄우고 `ClientSession`을 들고 있다가 `main`이 끝날 때 닫는다. 종목 15개가 세션 하나를 공유한다(`Send` fan-out은 스레드 병렬이므로 세션 호출에 락).
+- **도구 호출 순서는 코드가 정한다** (D12·N14). LLM에는 도구를 주지 않는다.
+- I/O 층에 `mcpc.py`(세션·타임아웃·버전 고정) · `dart_mcp.py`(응답 → `Disclosure`/anomaly/insider) · `news_mcp.py`(응답 → `NewsItem`) · `stock_mcp.py`(응답 → 시총·거래대금)가 늘고, `dart.py`는 폴백으로 남는다. 도메인 층은 `flags.py`에 규칙 `insider_sell_cluster` 하나가 는다.
+- 테스트: MCP 응답은 **표본 JSON**(`tests/fixtures/mcp_*.json`)으로 mock — 실제 Node 기동은 CI 통합 단계에서만.
+
 ## 2. 디렉토리 구조
 
 ```
@@ -273,6 +289,27 @@ class Briefing:
 
 **완료 기준**: 규칙표가 실데이터 표본과 대조됨 · 드라이런 분포 합리적 · 🔴 표본 전 건 원문 링크로 손검증 · 일 호출 < 100회
 
+### M1b — MCP 계층 (1.5일, v2.0 · D12~D15 확정 후)
+
+- `mcpc.py` — `mcp` SDK stdio 클라이언트: 서버 정의(패키지@버전 · env) · 세션 1회 · `call(tool, args, timeout=30)` · 락 · 실패 예외
+- `dart_mcp.py` — `search_disclosures` 응답 → `Disclosure` · `disclosure_anomaly` → `{score, verdict}` · `insider_signal` → 군집 종류. 표본 JSON 계약 테스트
+- `flags.py` — 🟡 `insider_sell_cluster` 규칙 + SAMPLES
+- `fetch_one` 재구성 — ①~③ + REST 폴백 + 생략 표기 (20줄 유지 — 순서는 `dart_mcp.enrich()`로 묶는다)
+- `schema.sql` — `ksb_briefings.anomaly jsonb` (`alter table … add column if not exists`)
+- CI — `setup-node`(20.19) + npm·`~/.korean-dart-mcp` 캐시 · 기동 시간 측정 → 「측정 기록」
+- 드라이런에 MCP 경로 추가 — REST 결과와 **공시 목록이 같은지** 대조(회귀)
+
+**완료 기준**: MCP 경로와 REST 경로의 30일 공시 목록이 일치 · korean-dart-mcp를 죽여도 폴백으로 완주 · CI 기동 < 60초
+
+### M1c — 뉴스 (1일, v2.0)
+
+- `news_mcp.py` — `search_news(query, display=5, sort="date")` → `NewsItem(title, press, date, link)` · HTML 태그·엔티티 제거 · 표본 계약 테스트
+- `fetch_one` ④ — 등급 `none`만 · 실패 시 생략
+- `render` — 📰 블록(제목·언론사·날짜·링크) · `⚠ 뉴스 생략` · 금지어 검사에 뉴스 제목은 **원문 예외**
+- `summary` — 입력에 뉴스 제목 포함, "입력에 없는 사실 금지" 유지
+
+**완료 기준**: `none` 종목에 뉴스가 붙은 메일 1통 손검증 · 키 없이 돌려도 메일 도착
+
 ### M2 — 본문·저장·발송 (1일)
 
 - `render.py` TDD — 🔴 요약 블록 · 전략/종목 순서 = 상위와 동일 · 링크 필수(N2) · 금지어(N1) · HTML 이스케이프 · 0건/데이터 지연/조회 실패 제목(F8) · 요약 실패 경고 줄
@@ -382,4 +419,7 @@ class Briefing:
 | 2026-08-26 | v0.9.1 | 아키텍처 그림 3장 PNG 추가 (`arch-overview.png` · `graph.png` · `modules.png`, 원본 `diagrams/*.dot`) — 사용자 요청 |
 | 2026-08-26 | v0.9.2 | **SPEC v1.1(D3 `repository_dispatch`) 반영** — §1 개요·그림, 게이트 루프 1분×10, `--if-not-briefed`, M4에 상위 `alert.yml`·PAT 작업, §7 리스크 3건, §9 준비물 |
 | 2026-08-26 | **v1.0 확정** | 사용자 TASKS.md 작성 지시로 확정. 태스크 55개(M0 12 · M1 10 · M2 9 · M3 8 · M4 11 · M5 5) |
+| 2026-08-29 | v1.1 검토 | 그림 3장 v2.0으로 갱신 — `arch-overview.png`(MCP 서버 층 · REST 폴백 · korea-stock-mcp 회색) · `graph.png`(`fetch_one` ①~④ · MCP 세션 메모) · `modules.png`(`mcpc`·`dart_mcp`·`news_mcp` · `dart.py` 폴백). 원본 `diagrams/*.dot` |
+| 2026-08-29 | v1.1 검토 | **v2.0 MCP 전환** 반영 — §1-3 MCP 계층, M1b·M1c 마일스톤 신설 (SPEC §2-3 D12~D15 확정 대기) |
+| 2026-08-29 | v1.0.2 | `FetchItem`에 `run_date` 추가 — 조회 창은 `[run_date−30, run_date]` (SPEC F4 `end_de=D`, D = 실행일). 드라이런은 `d+1`을 실행일로 본다 |
 | 2026-08-26 | v1.0.1 | 구현 중 조정 — `gate_timeout` 경로가 `finalize` 직행이 아니라 **`record_run`을 거친다** (실패 기록 우선 원칙). fan-out 0건이면 조건부 엣지가 `summarize`로 직행(빈 Send 목록은 그래프를 조용히 끝낸다) |

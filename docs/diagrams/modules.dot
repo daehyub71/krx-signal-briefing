@@ -1,6 +1,6 @@
 digraph modules {
-  graph [fontname="Apple SD Gothic Neo", fontsize=13, rankdir=TB, nodesep=0.35, ranksep=0.55, pad=0.4, bgcolor="white", compound=true,
-         label="krx-signal-briefing — 3층 분리와 모듈 의존 방향 (PLAN §3 · SPEC N3)", labelloc=t, labeljust=l];
+  graph [fontname="Apple SD Gothic Neo", fontsize=13, rankdir=TB, nodesep=0.35, ranksep=0.55, pad=0.4, bgcolor="white", compound=true, newrank=true,
+         label="krx-signal-briefing — 3층 분리와 모듈 의존 방향 v2.0 · MCP (PLAN §3·§1-3 · SPEC N3·N14)", labelloc=t, labeljust=l];
   node  [fontname="Apple SD Gothic Neo", fontsize=12, shape=box, style="rounded,filled", color="#3D465F", penwidth=1.2, margin="0.16,0.08"];
   edge  [fontname="Apple SD Gothic Neo", fontsize=10, color="#3D465F", arrowsize=0.8];
 
@@ -16,7 +16,11 @@ digraph modules {
   subgraph cluster_io {
     label=<<b>I/O 층</b> — 부수효과를 아는 유일한 곳 · 테스트는 전부 mock>; style="rounded,filled"; fillcolor="#FFFBF2"; color="#E0B458";
     store  [label=<store.py<br/><font point-size="10">ksa_* SELECT · ksb_* upsert</font>>, fillcolor="#FFF4E0"];
-    dart   [label=<dart.py<br/><font point-size="10">urllib · 013/020 · 키 마스킹</font>>, fillcolor="#FFF4E0"];
+    mcpc   [label=<<b>mcpc.py</b><br/><font point-size="10">MCP SDK stdio 세션 1회 · call(tool, timeout) · 락 · 버전 고정</font>>, fillcolor="#F3F0FA", color="#9C8AD1"];
+    dmcp   [label=<<b>dart_mcp.py</b><br/><font point-size="10">search_disclosures → Disclosure<br/>anomaly · insider</font>>, fillcolor="#FFF4E0"];
+    nmcp   [label=<<b>news_mcp.py</b><br/><font point-size="10">search_news → NewsItem</font>>, fillcolor="#FFF4E0"];
+    smcp   [label=<<b>stock_mcp.py</b><br/><font point-size="10">get_stock_trade_info → 시총·거래대금</font>>, fillcolor="#FFF4E0"];
+    dart   [label=<dart.py  <font point-size="10">(폴백 D15)</font><br/><font point-size="10">urllib · corpCode.xml · list.json · 키 마스킹</font>>, fillcolor="#FFF4E0", style="rounded,filled,dashed"];
     llm    [label=<llm.py<br/><font point-size="10">anthropic SDK · refusal 처리</font>>, fillcolor="#FFF4E0"];
     notify [label=<notify.py<br/><font point-size="10">smtplib · STARTTLS</font>>, fillcolor="#FFF4E0"];
     config [label=<config.py<br/><font point-size="10">.env · Secrets</font>>, fillcolor="#FFF4E0"];
@@ -34,19 +38,28 @@ digraph modules {
   subgraph cluster_ext {
     label=<<b>외부</b>>; style="rounded,filled"; fillcolor="#FAFBFD"; color="#C5CAD6";
     e_db  [label="Supabase\n(supabase-py · psycopg)", fillcolor="#EEF0F5"];
+    e_kdart [label="korean-dart-mcp\n(Node · npx)", fillcolor="#F3F0FA", color="#9C8AD1"];
+    e_knav  [label="naver-search-mcp\n(Node · npx)", fillcolor="#F3F0FA", color="#9C8AD1"];
+    e_kstk  [label="korea-stock-mcp\n(Node · npx)", fillcolor="#F3F0FA", color="#9C8AD1"];
+    e_krx   [label="KRX OPEN API", fillcolor="#EEF0F5"];
     e_dart [label="OpenDART", fillcolor="#EEF0F5"];
+    e_naver [label="네이버 검색 API", fillcolor="#EEF0F5"];
     e_ant [label="Anthropic API", fillcolor="#EEF0F5"];
     e_smtp [label="Gmail SMTP", fillcolor="#EEF0F5"];
   }
 
-  nodes -> store; nodes -> dart; nodes -> llm; nodes -> notify;
+  mcpc -> flags [style=invis]; mcpc -> render [style=invis]; mcpc -> summary [style=invis]; mcpc -> corp [style=invis];
+  nodes -> store; nodes -> dmcp; nodes -> nmcp; nodes -> smcp; nodes -> llm; nodes -> notify;
+  nodes -> dart [style=dashed, label=" 폴백", fontsize=9];
+  dmcp -> mcpc; nmcp -> mcpc; smcp -> mcpc;
   nodes -> flags [color="#2E7D32"]; nodes -> render [color="#2E7D32"];
   dart -> corp [color="#2E7D32"]; llm -> summary [color="#2E7D32"];
-  store -> e_db; dart -> e_dart; llm -> e_ant; notify -> e_smtp;
+  store -> e_db; mcpc -> e_kdart; mcpc -> e_knav; mcpc -> e_kstk; e_kstk -> e_krx [style=dotted]; dart -> e_dart [style=dashed]; llm -> e_ant; notify -> e_smtp;
+  e_kdart -> e_dart [style=dotted]; e_knav -> e_naver [style=dotted];
   main -> config [style=dashed];
   corp -> models [style=dashed, color="#9AA3B8"]; flags -> models [style=dashed, color="#9AA3B8"];
   render -> models [style=dashed, color="#9AA3B8"]; summary -> models [style=dashed, color="#9AA3B8"];
 
-  note [shape=note, fillcolor="#FFFFFF", fontsize=10, label="화살표는 한 방향이다.\n도메인 층 → I/O 층 import는 리뷰에서 막는다.\nLangGraph를 걷어내도 도메인 코드는 그대로 살아 있어야 한다."];
+  note [shape=note, fillcolor="#FFFFFF", fontsize=10, label="화살표는 한 방향이다.\n도메인 층 → I/O 층 import는 리뷰에서 막는다.\nLangGraph를 걷어내도 도메인 코드는 그대로 살아 있어야 한다.\nMCP 서버는 데이터 소스다 — 도구 순서는 코드가 정하고 LLM에 도구를 주지 않는다 (N14)."];
   models -> note [style=invis];
 }
