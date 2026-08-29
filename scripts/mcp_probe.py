@@ -74,7 +74,9 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="mcp_probe")
     p.add_argument("--tools", action="store_true", help="도구 이름을 전부 출력")
     p.add_argument("--sample", metavar="CORP_CODE", help="도구 호출 표본까지 (예: 00126380)")
-    p.add_argument("--require", nargs="*", default=["dart"], help="반드시 떠야 하는 서버")
+    # 기본은 아무것도 요구하지 않는다 — 키가 없는 환경(CI Secrets 등록 전)에서 실패시키지 않기 위해.
+    # 실제 기동을 강제하려면 `--require dart`처럼 명시한다.
+    p.add_argument("--require", nargs="*", default=[], help="반드시 떠야 하는 서버")
     args = p.parse_args(argv)
     config.load_env()
 
