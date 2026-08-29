@@ -26,4 +26,6 @@
 | `mcp_stock_corp_code.json` | korea-stock-mcp@1.4.1 `get_corp_code(stock_code)` | KRX 키 없이 동작 |
 | `mcp_stock_error_nokey.txt` | `get_stock_trade_info` (KRX 키 없음) | `is_error=True` 본문 원문 |
 
-naver-search-mcp 표본은 NCP 키 발급 후 수집한다. 프로브 스크립트: `scripts/`에 M1b `mcpc.py`가 들어오면 그것으로 대체.
+| `mcp_news.json` | naver-search-mcp@1.0.50 `search_news(query="가비아", display=5, sort="date")` — 2026-08-29 실호출 | `lastBuildDate·total·start·display·items`. 항목: `title`(**`<b>` 태그·HTML 엔티티 포함**) · `originallink` · `link` · `description` · `pubDate`(RFC 822: `Fri, 28 Aug 2026 …`) |
+
+프로브: `python scripts/mcp_probe.py --tools`.

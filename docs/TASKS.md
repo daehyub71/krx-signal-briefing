@@ -115,8 +115,9 @@
 ## M1c — 뉴스 (v2.0 · F11)
 
 - [x] `npx -y @isnow890/naver-search-mcp@1.0.50` **기동 확인** (2026-08-29): 패키지 실행 0.9초 · 자격증명 쌍을 주면 **0.5초 기동 · 도구 18개**. `mcpc.Spec`을 `required` → **`credentials`(쌍 목록 중 하나면 기동)**로 바꿔 **HUB 쌍·개발자센터 쌍 둘 다 지원** · `.env.example`에 두 경로 자리 · 테스트 3개
-- [ ] **네이버 키 발급 후 `.env`·Secrets 등록** — ① NCP API HUB(권장) ② 개발자센터(즉시·카드 불필요, 2027-06 종료). 처리한도 25,000/일, 우리는 하루 ≤15회
-- [ ] `tests/fixtures/mcp_news.json` 표본 · `briefing/news_mcp.py` — `search_news` → `NewsItem` · HTML 태그·엔티티 제거 · 계약 테스트
+- [x] **네이버 키 `.env` 등록·검증** (2026-08-29) — 개발자센터 키(ID 20자·Secret 10자). 처음 `NCP_APIGW_*` 변수에 들어와 있어 **HTTP 401**(`Not Exist Client ID`) → `NAVER_CLIENT_ID`/`NAVER_CLIENT_SECRET`로 이동하니 정상(total 18,765). MCP 경유 `search_news` 실호출 확인 · `mcp_news.json` 표본 확보. **Secrets 등록은 M4**
+- [x] `tests/fixtures/mcp_news.json` 표본 (실호출)
+- [ ] `briefing/news_mcp.py` — `search_news` → `NewsItem` · **`<b>` 태그·HTML 엔티티 제거** · `pubDate`(RFC 822) 파싱 · 계약 테스트
 - [ ] `fetch_one` ④ — 등급 `none`만 · 실패 시 생략 · `ksb_briefings.news` 저장
 - [ ] `render` 📰 블록 · `⚠ 뉴스 생략` · 금지어 검사에서 뉴스 제목 원문 예외 · `summary` 입력에 뉴스 제목
 - [ ] 키 없이 실행 → 메일 도착 · `none` 종목 뉴스 메일 1통 손검증
@@ -201,7 +202,7 @@
 | M1b MCP 기동 (2026-08-29, 로컬 Node 22 · mcp 2.1.1) | korean-dart-mcp@0.10.1 **콜드 10.9초 / 웜 0.6초**, 도구 18 · korea-stock-mcp@1.4.1 1.4 / 0.5초, 도구 8 · naver-search-mcp@1.0.50 **키 없으면 기동 거부**. 도구 호출: search_disclosures 0.1초(페이지 20건 → `all_pages` 필요) · disclosure_anomaly 2.3초 · insider_signal 0.4초 | 2026-08-29 |
 | M1b 시세 경로 전환 (2026-08-29) | 세 경로 비교 후 **상위 DB 경유 채택**: ① pykrx 직접(키 불필요·호출 1회·의존성 +pykrx) ② **상위 수집 → 우리는 SQL**(채택) ③ korea-stock-mcp(KRX OPEN API 키 필요·≤18회). 상위 `update --update`에 pykrx 1회가 늘고, 우리 쪽 외부 호출은 0회가 됐다. 실측: 상위 2,767/2,769종목 수집, `ksc_tickers.mktcap` null 2종목 | 2026-08-29 |
 | M1b dart_mcp ≡ REST (2026-08-29) | `search_disclosures` 인자별: all_pages만 53 · **all_pages+include_corrections 61** · page size=100 61 · days=30+all_pages 53 — REST 61과 일치하는 조합으로 고정. 실서버 통합 테스트 통과(집합·정렬 동일) | 2026-08-29 |
-| M1c naver-search-mcp 기동 (2026-08-29) | 패키지 실행 0.9초 · 키 쌍 주면 **0.5초 기동 · 도구 18개**(search_news 포함). 키 없음/반쪽이면 서버가 스스로 종료 → 우리는 띄우기 전에 거른다 | 2026-08-29 |
+| M1c naver-search-mcp (2026-08-29) | 기동 **1.0초 · 도구 18개**(search_news 등 검색 8 + datalab 9 + find_category). 서버 로그에 `Using 네이버 개발자센터 (2027-06-30 지원 종료 예정)` — 어느 쌍으로 붙었는지 스스로 알린다. 실호출: 가비아 뉴스 total 18,765 · 응답 0.x초 · 항목에 `<b>` 태그와 HTML 엔티티가 섞여 온다(정제 필요) | 2026-08-29 |
 | M1 🔴 손검증 (2026-08-29) | 12종목 원문 대조 **11/12 정확**. 오탐 1: 한화갤러리아(인적분할 — 지분율 54.29% 불변). 부수 확인: `최대주주변경`은 `최대주주등소유주식변동신고서(최대주주변경시)`와 **짝으로 와서 같은 사건이 2줄** → M2 렌더에서 묶기 검토 | 2026-08-29 |
 | M1b 경로 대조 (2026-08-29) | `dryrun.py --source both` 8종목 — **MCP ≡ REST 불일치 0건**. DART 호출 17회(양쪽 각 8 + corpCode 1) | 2026-08-29 |
 | M1b MCP 기동 (로컬 웜, 2026-08-29) | korean-dart-mcp **1.0초**(18도구) · korea-stock-mcp 0.8초(배치 제외) · naver 키 없어 건너뜀 · 총 4.9초. 도구 호출: search_disclosures 0.1초 · disclosure_anomaly 2.2초 · insider_signal 0.4초 | 2026-08-29 |
