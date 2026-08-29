@@ -107,7 +107,7 @@
 
 **완료 기준 — 충족 (2026-08-29)**
 - MCP·REST 공시 목록 일치 (통합 테스트 `MCP_INTEGRATION=1`) · 폴백 경로 테스트 · 로컬 웜 기동 1.0초
-- ⏳ CI 기동 시간은 첫 푸시 후 확인 (콜드 10.9초 실측 · 캐시 적용 시 단축 예상)
+- CI `mcp` 잡 녹색 (2026-08-29). **기동 시간은 Secrets 등록 후(M4) 측정** — 지금은 키가 없어 두 서버 모두 건너뛴다
 
 ---
 
@@ -220,6 +220,7 @@
 | 2 | `corpCode.xml`이 175바이트, `BadZipFile` (2026-08-29 토 10:39) | **DART 시스템 점검** — HTTP 200으로 `<status>800</status>` XML을 준다. zip이 아니다 | `dart.py`는 `PK` 매직 바이트/`<status>`로 오류 본문을 먼저 가려낸다. 응답 원문을 `tests/fixtures/corpcode_error_800.xml`로 보관. 토요일 오전 점검이라 평일 08:45 실행과는 무관해 보이나, 평일 점검 여부는 미해소 이슈 ⑥ |
 | 1 | 08/25 신호 44건인데 `sent_email=true`가 0건 (2026-08-26 연결 테스트) | 상위 배치가 `sent_email` 열을 저장하지 않는다 — 카카오 상위 10건만 `sent_kakao=true`. 메일 발송 집합은 `suppressed=false` 전체(15건 = `ksa_runs.sent_email_n`) | SPEC F2를 `suppressed = false`로 변경(v1.1.1). 코드에서 `sent_email`을 쓰지 않는다 |
 
+| 5 | CI `mcp` 잡이 두 번 실패 (2026-08-29) | ① Secrets에 `DART_API_KEY`가 없어 dart가 안 뜸 ② `--require`의 **기본값이 `["dart"]`**라 인자를 안 줘도 요구했다 | 키가 있을 때만 `--require dart`를 붙이도록 워크플로 분기 + `--require` 기본값을 빈 목록으로. **키 없음은 CI 실패 사유가 아니다** — 그 층이 없는 것뿐이다(D15) |
 | 3 | MCP 프로브가 `tool.inputSchema`·`result.isError`에서 `AttributeError` (2026-08-29) | **MCP 파이썬 SDK 2.x는 snake_case** (`input_schema`·`is_error`). 1.x 문서·예제와 다르다 | 2.x 필드명 사용. `mcpc.py`에 계약 테스트로 고정 |
 | 4 | korea-stock-mcp `get_stock_trade_info` 인자 오류 | README는 `isuSrtCd/fromDate/toDate`인데 실제 스키마는 `basDdList/market/codeList` | 실스키마 기준. `mcpc.list_tools()`로 기동 시 스키마를 확인해 로그 |
 
