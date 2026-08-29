@@ -109,7 +109,7 @@ def connector_for(session: FakeSession, *, fail: Exception | None = None) -> Any
     return connect
 
 
-SPEC = Spec(name="fake", package="fake-mcp", version="1.0.0", env=(), required=())
+SPEC = Spec(name="fake", package="fake-mcp", version="1.0.0", env=(), credentials=())
 
 
 @pytest.fixture
@@ -175,7 +175,7 @@ def test_missing_required_env_fails_before_spawn(monkeypatch: pytest.MonkeyPatch
         package="x",
         version="1",
         env=("NCP_APIGW_API_KEY_ID",),
-        required=("NCP_APIGW_API_KEY_ID",),
+        credentials=(("NCP_APIGW_API_KEY_ID",),),
     )
     spawned: list[Spec] = []
 
@@ -202,7 +202,11 @@ def test_env_passes_only_listed_keys(monkeypatch: pytest.MonkeyPatch) -> None:
         yield FakeSession()
 
     spec = Spec(
-        name="dart", package="x", version="1", env=("DART_API_KEY",), required=("DART_API_KEY",)
+        name="dart",
+        package="x",
+        version="1",
+        env=("DART_API_KEY",),
+        credentials=(("DART_API_KEY",),),
     )
     s = McpServer(spec, connector=connect)
     s.start(timeout=5)
@@ -310,8 +314,62 @@ def test_server_specs_are_pinned() -> None:
     )
     # korea-stock-mcp는 배치에서 뺐다 (D14 v2) — 시총은 상위 ksc_tickers에서 SQL로 읽는다
     assert set(SERVERS) == {"dart", "naver"}
-    assert SERVERS["dart"].required == ("DART_API_KEY",)
-    assert set(SERVERS["naver"].required) == {"NCP_APIGW_API_KEY_ID", "NCP_APIGW_API_KEY"}
+    assert SERVERS["dart"].credentials == (("DART_API_KEY",),)
+
+
+def test_naver_accepts_either_credential_pair() -> None:
+    """서버 소스 확인(2026-08-29): HUB 쌍 또는 개발자센터 쌍 — **둘 중 하나**면 뜬다.
+
+    두 값은 항상 짝이어야 하고, HUB 쌍이 우선한다 (`resolveCredentials`).
+    """
+    assert SERVERS["naver"].credentials == (
+        ("NCP_APIGW_API_KEY_ID", "NCP_APIGW_API_KEY"),
+        ("NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"),
+    )
+    # 서버 프로세스에는 네 변수를 다 넘긴다 — 어느 쌍이 들어올지 모른다
+    assert set(SERVERS["naver"].env) == {
+        "NCP_APIGW_API_KEY_ID",
+        "NCP_APIGW_API_KEY",
+        "NAVER_CLIENT_ID",
+        "NAVER_CLIENT_SECRET",
+    }
+
+
+def test_naver_starts_with_legacy_pair_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """개발자센터 키만 있어도 띄운다 — HUB 키만 보면 그 층을 통째로 잃는다."""
+    for k in ("NCP_APIGW_API_KEY_ID", "NCP_APIGW_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("NAVER_CLIENT_ID", "id")
+    monkeypatch.setenv("NAVER_CLIENT_SECRET", "secret")
+    seen: dict[str, str] = {}
+
+    @asynccontextmanager
+    async def connect(sp: Spec, env: dict[str, str]) -> AsyncIterator[FakeSession]:
+        seen.update(env)
+        yield FakeSession()
+
+    s = McpServer(SERVERS["naver"], connector=connect)
+    s.start(timeout=5)
+    s.close()
+    assert seen["NAVER_CLIENT_ID"] == "id" and "NCP_APIGW_API_KEY_ID" not in seen
+
+
+def test_naver_half_pair_does_not_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """반쪽 쌍이면 서버가 '불완전합니다'로 죽는다 — 띄우기 전에 거른다."""
+    for k in ("NCP_APIGW_API_KEY", "NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("NCP_APIGW_API_KEY_ID", "only-half")
+    spawned: list[Spec] = []
+
+    @asynccontextmanager
+    async def connect(sp: Spec, env: dict[str, str]) -> AsyncIterator[FakeSession]:
+        spawned.append(sp)
+        yield FakeSession()
+
+    s = McpServer(SERVERS["naver"], connector=connect)
+    with pytest.raises(McpStartError, match="NCP_APIGW_API_KEY"):
+        s.start(timeout=5)
+    assert spawned == []
 
 
 def test_npx_command_pins_version() -> None:

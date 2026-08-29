@@ -72,7 +72,7 @@
 | MCP | 실행 · 전송 | 인증 | 이 프로젝트에 주는 것 | 함정 |
 |-----|------------|------|----------------------|------|
 | [korean-dart-mcp](https://github.com/chrisryugj/korean-dart-mcp) | `npx -y korean-dart-mcp` · stdio · **Node 20.19+** · MIT | `DART_API_KEY` (있음) | `search_disclosures(corp_code, days)` · `disclosure_anomaly`(0~100 + verdict) · `insider_signal`(임원 매매 군집) · `get_major_holdings` | 첫 실행에 corp 코드 11.6만 건을 SQLite(`~/.korean-dart-mcp`, 24h TTL)로 적재 — **CI는 매 실행이 콜드스타트**. `resolve_corp_code`는 **이름** 기반 |
-| [naver-search-mcp](https://github.com/isnow890/naver-search-mcp) | `npx -y @isnow890/naver-search-mcp` · stdio · Node 18+ · MIT | **네이버 키 신규 발급** — NCP API HUB `NCP_APIGW_API_KEY_ID`/`NCP_APIGW_API_KEY` (구 developers 키는 2027-06-30 종료) | `search_news(query, display, sort)` | PlayMCP 무키 경로는 로그인 세션 기반 → 무인 배치 불가 (403 실측, 상위 PROPOSAL §5-A) |
+| [naver-search-mcp](https://github.com/isnow890/naver-search-mcp) | `npx -y @isnow890/naver-search-mcp` · stdio · Node 18+ · MIT | **네이버 키 신규 발급 — 두 경로 중 하나** (서버 `resolveCredentials` 소스 확인, 2026-08-29): ① NCP API HUB `NCP_APIGW_API_KEY_ID`+`NCP_APIGW_API_KEY` (권장, HUB 쌍 우선) ② 네이버 개발자센터 `NAVER_CLIENT_ID`+`NAVER_CLIENT_SECRET` (즉시 발급·카드 불필요, **2027-06-30 종료**). 처리한도 25,000회/일 | `search_news(query, display, sort)` | **두 값은 항상 짝**이어야 한다 — 반쪽이면 기동 거부. 두 자격증명은 서로 호환되지 않는다. PlayMCP 무키 경로는 로그인 세션 기반 → 무인 배치 불가 (403 실측) |
 | [korea-stock-mcp](https://github.com/jjlabsio/korea-stock-mcp) | `npx -y korea-stock-mcp` · stdio · Node 18+ · ISC | `DART_API_KEY` + **`KRX_API_KEY`** (KRX OPEN API 등록·승인 ~1일) | **기관·외국인 순매수 도구가 없다.** `get_stock_trade_info`는 일별 시세·거래량(= `ksc_bars`와 중복), 공시 도구는 korean-dart-mcp와 중복 | 새로 주는 데이터가 없다 |
 
 | ID | 항목 | 상태 | 추천 | 근거 |

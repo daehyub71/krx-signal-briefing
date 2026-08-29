@@ -51,8 +51,20 @@ class Spec:
     name: str
     package: str
     version: str
-    env: tuple[str, ...]  # 넘길 환경변수 (있으면)
-    required: tuple[str, ...]  # 없으면 띄우지 않는다
+    env: tuple[str, ...]  # 서버 프로세스에 넘길 환경변수 (있는 것만)
+    # 자격증명 쌍 목록 — **하나라도 온전하면** 띄운다. 반쪽이면 서버가 스스로 죽으므로 미리 거른다.
+    # 예: naver는 (HUB 쌍, 개발자센터 쌍) 둘 중 하나면 된다
+    # (서버 resolveCredentials 소스로 확인, 2026-08-29).
+    credentials: tuple[tuple[str, ...], ...]
+
+    def missing_credentials(self) -> list[str]:
+        """온전한 쌍이 하나도 없으면 첫 쌍의 빠진 이름들을 돌려준다. 있으면 빈 목록."""
+        if not self.credentials:
+            return []
+        gaps = [
+            [k for k in pair if not os.environ.get(k, "").strip()] for pair in self.credentials
+        ]
+        return [] if any(not g for g in gaps) else gaps[0]
 
 
 # 2026-08-29 로컬 기동 실측 버전. 올릴 때는 계약 테스트(표본 JSON)를 다시 돌린다.
@@ -65,15 +77,25 @@ SERVERS: dict[str, Spec] = {
         package="korean-dart-mcp",
         version="0.10.1",
         env=("DART_API_KEY",),
-        required=("DART_API_KEY",),
+        credentials=(("DART_API_KEY",),),
     ),
     "naver": Spec(
         name="naver",
         package="@isnow890/naver-search-mcp",
         version="1.0.50",
-        env=("NCP_APIGW_API_KEY_ID", "NCP_APIGW_API_KEY"),
-        # 키가 없으면 서버가 기동 자체를 거부한다 (실측) — 띄우기 전에 거른다
-        required=("NCP_APIGW_API_KEY_ID", "NCP_APIGW_API_KEY"),
+        # 어느 쌍이 올지 모르니 넷을 다 넘긴다 (서버가 HUB 쌍을 우선한다)
+        env=(
+            "NCP_APIGW_API_KEY_ID",
+            "NCP_APIGW_API_KEY",
+            "NAVER_CLIENT_ID",
+            "NAVER_CLIENT_SECRET",
+        ),
+        # 키가 없거나 반쪽이면 서버가 기동 자체를 거부한다 (실측) — 띄우기 전에 거른다.
+        # HUB 쌍(권장) 또는 개발자센터 쌍(2027-06-30 종료) 중 **하나만** 온전하면 된다.
+        credentials=(
+            ("NCP_APIGW_API_KEY_ID", "NCP_APIGW_API_KEY"),
+            ("NAVER_CLIENT_ID", "NAVER_CLIENT_SECRET"),
+        ),
     ),
 }
 
@@ -160,9 +182,9 @@ class McpServer:
             timeout: 기동 대기 상한(초). korean-dart-mcp 콜드스타트는 10초대다.
 
         Raises:
-            McpStartError: 필수 키 없음 · npx/서버 실패 · 대기 초과.
+            McpStartError: 자격증명 쌍이 하나도 온전하지 않음 · npx/서버 실패 · 대기 초과.
         """
-        missing = [k for k in self.spec.required if not os.environ.get(k, "").strip()]
+        missing = self.spec.missing_credentials()
         if missing:
             self._dead = f"환경변수 없음: {', '.join(missing)}"
             raise McpStartError(f"[{self.spec.name}] {self._dead} — 서버를 띄우지 않는다")
