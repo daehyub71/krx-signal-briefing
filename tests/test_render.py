@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from datetime import date
+from html import escape
 
 import pytest
 
@@ -21,6 +22,7 @@ from briefing.models import (
     Insider,
     NewsItem,
     SignalRow,
+    dart_link,
 )
 
 D = date(2026, 8, 25)
@@ -82,11 +84,11 @@ def own_words(body: str, briefings: list[Briefing]) -> str:
     out = body
     for b in briefings:
         for d in b.disclosures:
-            out = out.replace(d.report_nm, " ")
+            out = out.replace(escape(d.report_nm), " ").replace(d.report_nm, " ")
         for n in b.news:
-            out = out.replace(n.title, " ")
+            out = out.replace(escape(n.title), " ").replace(n.title, " ")
     for b in briefings:
-        out = out.replace(b.name, " ")
+        out = out.replace(escape(b.name), " ").replace(b.name, " ")
     return out
 
 
@@ -156,6 +158,7 @@ def test_unknown_and_error_are_marked() -> None:
 
 def test_side_signals_are_shown_as_reference() -> None:
     b = briefing(
+        "amber",
         anomaly=Anomaly(score=68, verdict="warning", summary="정정공시 42/2000건"),
         insider=Insider(
             signal="sell_cluster", sell_events=4, unique_sellers=3, net_change_shares=-900
@@ -176,14 +179,20 @@ def test_side_signals_are_shown_as_reference() -> None:
 
 
 def test_news_block_lists_title_date_and_link() -> None:
-    body = render.text([briefing(news=NEWS)], D)
-    assert "📰" in body
-    assert NEWS[0].title in body
-    assert "08/28" in body and NEWS[0].link in body
+    """뉴스 제목·날짜·링크는 HTML 본문이 담는다.
+
+    평문 대체본은 위험 종목만 펼치고 나머지는 한 줄이다 — 두 벌을 다 펴면
+    메시지가 Gmail 클리핑 한계를 넘는다 (2026-08-29).
+    """
+    b = briefing(news=NEWS)
+    doc = render.html([b], D)
+    assert escape(NEWS[0].title) in doc and "08/28" in doc and NEWS[0].link in doc
+    assert "뉴스 1건" in render.text([b], D)
 
 
 def test_news_absent_when_flagged() -> None:
     assert "📰" not in render.text([RED], D)
+    assert "같은 기간 뉴스" not in render.html([RED], D)
 
 
 @pytest.mark.parametrize(
@@ -206,6 +215,7 @@ def test_summary_failure_is_marked() -> None:
 
 
 def test_summary_line_is_shown_when_present() -> None:
+    """한 줄 요약은 평문의 압축된 한 줄에서도 살아남는다 — 요약이 가장 값이 큰 문장이다."""
     body = render.text([briefing(summary="08/22 CB 발행 결정 — 위험 유형 1건")], D)
     assert "💬 08/22 CB 발행 결정 — 위험 유형 1건" in body
 
@@ -225,14 +235,14 @@ def test_forbidden_word_in_a_disclosure_title_is_allowed() -> None:
     odd = Disclosure(
         rcept_dt=D, report_nm="투자판단관련주요경영사항(매수청구)", rcept_no="9", flr_nm="x"
     )
-    body = render.text([briefing(disclosures=(odd,))], D)
-    assert odd.report_nm in body
+    b = briefing(disclosures=(odd,))
+    assert odd.report_nm in render.html([b], D)
+    assert odd.report_nm in render.text([briefing("amber", disclosures=(odd,))], D)
 
 
 def test_forbidden_word_in_a_news_title_is_allowed() -> None:
     noisy = NewsItem(title="목표가 상향 소식에 매수세", link="https://n", published=D)
-    body = render.text([briefing(news=(noisy,))], D)
-    assert noisy.title in body
+    assert escape(noisy.title) in render.html([briefing(news=(noisy,))], D)
 
 
 # ── HTML · 평문 ─────────────────────────────────────────────────
@@ -287,7 +297,7 @@ def test_plain_disclosures_are_capped_with_a_note() -> None:
         )
         for i in range(16)
     )
-    body = render.text([briefing(disclosures=many)], D)
+    body = render.text([briefing("amber", disclosures=many)], D)
     shown = body.count("분기보고서")
     assert shown == render.PLAIN_DISCLOSURES
     assert f"외 {16 - render.PLAIN_DISCLOSURES}건" in body
@@ -307,3 +317,265 @@ def test_flagged_disclosures_are_never_omitted() -> None:
     body = render.text([b], D)
     assert CB.report_nm in body and f"rcpNo={CB.rcept_no}" in body
     assert "외 8건" in body
+
+
+# ── HTML 레이아웃 (2026-08-29 시안 합의 · docs/DESIGN.md) ────────
+#
+# 지금까지 본문은 `<pre>` 한 덩어리였다. 위험 2건이 15종목 사이에 묻혔고,
+# 공시마다 URL이 별도 줄로 나와 줄 수가 두 배였다 (2026-08-29 실측 — 18,012자).
+# 아래 테스트가 새 레이아웃의 계약을 잠근다.
+
+
+def many(n: int, level: str = "none") -> list[Briefing]:
+    """압축·생략을 시험할 만큼 공시를 채운 브리핑 하나."""
+    ds = tuple(
+        Disclosure(
+            rcept_dt=date(2026, 8, 20 - i),
+            report_nm=f"공시제목{i}",
+            rcept_no=f"2026082{i:07d}",
+            flr_nm="가비아",
+        )
+        for i in range(n)
+    )
+    return [briefing(level, disclosures=ds)]
+
+
+def test_html_puts_every_stock_in_the_index_table() -> None:
+    """맨 위 인덱스 표가 15종목을 한 번에 훑는 **유일한** 자리다."""
+    bs = [
+        briefing("none"),
+        Briefing.from_signal(sig("227950", "엔투텍"), "2", "none"),
+        Briefing.from_signal(sig("413630", "씨피시스템"), "3", "none"),
+    ]
+    doc = render.html(bs, D)
+    assert "한눈에 보기" in doc
+    for b in bs:
+        assert b.ticker in doc and b.name in doc
+
+
+def test_html_disclosure_title_is_the_link_not_a_separate_url_line() -> None:
+    """제목 자체가 링크다 — URL을 본문 텍스트로 다시 적지 않는다.
+
+    예전에는 제목 아래 줄에 URL을 그대로 적어 줄 수가 두 배였다.
+    """
+    doc = render.html([RED], D)
+    url = dart_link(CB.rcept_no)
+    assert f'<a href="{url}"' in doc
+    # href 속성을 지운 뒤에도 URL이 남아 있으면 = 본문에 URL을 또 적은 것
+    without_hrefs = re.sub(r'href="[^"]*"', "", doc)
+    assert url not in without_hrefs
+
+
+def test_html_risky_section_comes_before_the_rest() -> None:
+    """위험 종목을 위로 올린다 — 아래로 내려가면 스크롤에 묻힌다."""
+    doc = render.html([briefing("none"), RED], D)
+    assert doc.index(render.SECTION_RISK) < doc.index(render.SECTION_REST)
+
+
+def test_html_compact_card_caps_disclosures_and_says_how_many_were_left_out() -> None:
+    """위험 없는 종목은 압축 카드 — 공시 3건까지, 잘린 수는 드러낸다."""
+    doc = render.html(many(9), D)
+    assert doc.count("공시제목") == render.COMPACT_DISCLOSURES
+    assert f"외 {9 - render.COMPACT_DISCLOSURES}건" in doc
+
+
+def test_html_never_omits_a_flagged_disclosure() -> None:
+    """플래그된 공시는 상한을 받지 않는다 — 그것 때문에 보내는 메일이다."""
+    flagged = tuple(
+        Disclosure(
+            rcept_dt=date(2026, 8, 20),
+            report_nm=f"주요사항보고서(전환사채권발행결정){i}",
+            rcept_no=f"cb{i}",
+            flr_nm="가비아",
+        )
+        for i in range(6)
+    )
+    b = briefing(
+        "red",
+        disclosures=flagged + (QUARTERLY,) * 8,
+        flags=tuple(
+            Flag(rule="cb", level="red", rcept_no=d.rcept_no, report_nm=d.report_nm)
+            for d in flagged
+        ),
+    )
+    doc = render.html([b], D)
+    for d in flagged:
+        assert d.report_nm in doc
+
+
+def test_html_caps_news_in_a_compact_card() -> None:
+    news = tuple(
+        NewsItem(title=f"뉴스제목{i}", link=f"https://n/{i}", published=D) for i in range(7)
+    )
+    doc = render.html([briefing("none", news=news)], D)
+    assert doc.count("뉴스제목") == render.COMPACT_NEWS
+    assert f"외 {7 - render.COMPACT_NEWS}건" in doc
+
+
+def test_html_body_carries_no_emoji() -> None:
+    """본문에서 이모지를 뺐다 — 클라이언트마다 다른 그림이 온다. 색 칩으로 바꿨다.
+
+    제목(`subject`)의 🔴은 유지한다 — 받은편지함 목록에서 눈에 띄어야 한다.
+    """
+    doc = render.html([RED, briefing("none", news=NEWS)], D)
+    for mark in ("🔴", "🟡", "📄", "📊", "💰", "📰", "👤", "💬"):
+        assert mark not in doc, mark
+    assert "🔴" in render.subject([RED], D)
+
+
+def test_html_keeps_the_limit_note() -> None:
+    """한계 문구는 어떤 경우에도 빠지지 않는다 (R7·N1)."""
+    for doc in (
+        render.html([RED], D),
+        render.html([], D),
+        render.html([], D, stale=True),
+    ):
+        assert render.LIMIT_NOTE in doc
+
+
+def test_html_uses_no_forbidden_word_in_our_own_sentences() -> None:
+    """원문(공시·뉴스 제목)을 지운 나머지 = 우리가 쓴 문장. 여기에 금지어가 없어야 한다."""
+    odd = Disclosure(
+        rcept_dt=D, report_nm="투자판단관련주요경영사항(매수청구)", rcept_no="9", flr_nm="x"
+    )
+    noisy = NewsItem(title="목표가 상향 소식에 매수세", link="https://n", published=D)
+    bs = [RED, briefing("none", disclosures=(odd,), news=(noisy,))]
+    ours = own_words(render.html(bs, D), bs)
+    for word in render.FORBIDDEN:
+        assert word not in ours, word
+
+
+def test_html_shows_skipped_layers() -> None:
+    """생략된 층은 조용히 빠지지 않는다 (D15)."""
+    doc = render.html([briefing("none", skipped=("flow", "news"))], D)
+    assert "시세 참고 생략" in doc and "뉴스 생략" in doc
+
+
+def test_html_shows_the_summary_when_present() -> None:
+    doc = render.html([briefing("none", summary="최근 30일 공시는 정기보고서뿐입니다")], D)
+    assert "최근 30일 공시는 정기보고서뿐입니다" in doc
+
+
+def test_html_reports_a_summary_failure_without_hiding_the_disclosures() -> None:
+    doc = render.html([RED], D, summary_error="rate_limit")
+    assert "요약 생성 실패" in doc and CB.report_nm in doc
+
+
+def test_html_flag_labels_cover_every_rule() -> None:
+    """규칙을 늘리고 라벨을 안 만들면 머리 밴드에 영어 id가 그대로 나온다."""
+    from briefing import flags
+
+    ids = {r.id for r in flags.RULES} | {flags.INSIDER_RULE}
+    assert ids <= set(render.FLAG_LABELS)
+
+
+def test_html_names_the_flagged_rule_in_plain_korean() -> None:
+    doc = render.html([RED], D)
+    assert render.FLAG_LABELS["cb"] in doc
+
+
+def test_html_uses_tables_never_flex_or_grid() -> None:
+    """Gmail은 flex·grid를 안드로이드에서 무너뜨린다 — 배치는 표로만 한다."""
+    doc = render.html([RED, briefing("none", news=NEWS)], D)
+    assert "<table" in doc
+    assert "display:flex" not in doc and "display:grid" not in doc
+
+
+def test_html_keeps_grade_colors_inline_so_they_survive_a_stripped_style_block() -> None:
+    """되풀이되는 치수는 <style>로 접었다 — 하지만 **뜻이 있는 색은 inline이어야 한다**.
+
+    <style>을 지우는 클라이언트가 있다. 지워지면 표는 밋밋해질 뿐이지만,
+    등급 색까지 사라지면 위험 종목을 알아볼 수 없다.
+    """
+    doc = render.html([RED], D)
+    body = doc.split("</style>", 1)[1]
+    assert render.THEMES["red"][0] in body
+
+
+def test_html_is_much_shorter_than_the_old_pre_block() -> None:
+    """압축 카드의 존재 이유 — 15종목이 2만 자를 넘으면 읽히지 않는다."""
+    bs = many(16) * 13 + [RED, RED]
+    doc = render.html(bs, D)
+    assert len(doc) < 60_000  # 마크업 포함. 본문 글자수는 이보다 훨씬 적다
+
+
+def test_html_marks_a_corrected_disclosure() -> None:
+    fixed = Disclosure(
+        rcept_dt=D,
+        report_nm="[기재정정]주요사항보고서(전환사채권발행결정)",
+        rcept_no="fix1",
+        flr_nm="가비아",
+        corrected=True,
+    )
+    doc = render.html([briefing("none", disclosures=(fixed,))], D)
+    assert "정정" in doc
+
+
+def test_html_shows_market_cap_in_the_index() -> None:
+    flow = Flow(
+        bas_dd="20260827",
+        close=4000,
+        mktcap=145_746_420_000,
+        list_shrs=36_436_605,
+        trdval_5d=81_039_010_488,
+        days=5,
+    )
+    doc = render.html([briefing("none", flow=flow)], D)
+    assert "1,457억" in doc and "810억" in doc
+
+
+def test_html_handles_unknown_and_error_levels() -> None:
+    docs = render.html(
+        [briefing("unknown", corp_code=None), briefing("error", error="HTTP 500")], D
+    )
+    assert render.UNKNOWN_WORDING in docs and render.ERROR_WORDING in docs
+
+
+def test_html_compact_card_counts_conditions_actually_met() -> None:
+    """`5/5`는 전부 충족했을 때만이다 — 전체 개수를 두 번 적으면 항상 만점이 된다."""
+    ev = {
+        "conditions": [
+            {"label": "월봉 종가 > MA20", "ok": True, "actual": "a"},
+            {"label": "일봉 종가 > MA20", "ok": False, "actual": "b"},
+        ],
+        "price": {"close": 100, "change_pct": 0.5},
+    }
+    s = SignalRow(d=D, strategy="mtf", ticker="079940", name="가비아", evidence=ev)
+    doc = render.html([Briefing.from_signal(s, "1", "none")], D)
+    assert "신호 조건 1/2" in doc and "2/2" not in doc
+
+
+def test_html_stays_within_the_budget_by_folding_compact_cards_last() -> None:
+    """예산을 넘으면 압축 카드부터 접는다 — Gmail이 잘라내면 꼬리 문구까지 사라진다.
+
+    **접히지 않는 것이 설계다**: 인덱스 표(모든 종목)와 위험 종목 카드는 남는다.
+    """
+    bs = [RED] + many(14) * 40
+    doc = render.html(bs, D)
+    assert len(doc) <= render.HTML_BUDGET
+    assert CB.report_nm in doc  # 위험 공시는 접히지 않는다
+    assert "한눈에 보기" in doc
+    assert render.LIMIT_NOTE in doc
+    assert "위 「한눈에 보기」 표에 있습니다" in doc
+
+
+def test_html_does_not_fold_anything_when_it_fits() -> None:
+    doc = render.html([RED, briefing("none")], D)
+    assert "표에 있습니다" not in doc
+
+
+def test_real_sized_mail_fits_in_a_gmail_message() -> None:
+    """실제 하루치(15종목·🔴 2) 크기의 메시지가 Gmail 클리핑에 걸리지 않아야 한다.
+
+    2026-08-29: 전부 inline 스타일이던 첫 판이 149,971 bytes로 잘렸다. 그래서 이 테스트가 있다.
+    """
+    from email.message import EmailMessage
+
+    bs = [RED, RED] + many(12) * 13
+    msg = EmailMessage()
+    msg["Subject"] = render.subject(bs, D)
+    msg["From"] = "a@example.com"
+    msg["To"] = "b@example.com"
+    msg.set_content(render.text(bs, D))
+    msg.add_alternative(render.html(bs, D), subtype="html")
+    assert len(bytes(msg)) < render.GMAIL_CLIP_BYTES
