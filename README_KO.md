@@ -10,13 +10,13 @@
 
 이 프로젝트가 그 빈틈을 채웁니다. 상위 워크플로가 끝나면 깨어나 같은 신호를 읽고,
 **korean-dart-mcp**(OpenDART)로 종목별 최근 30일 공시를 가져와 투명한 키워드 규칙표로 등급(🔴 / 🟡)을 매기고,
-보조 신호(공시 이상 점수 · 임원 매매 군집 · **korea-stock-mcp**의 시가총액)를 덧붙이고, 아무것도 걸리지 않은 종목만 **naver-search-mcp**로 뉴스를 찾고,
+보조 신호(공시 이상 점수 · 임원 매매 군집 · 상위 DB에서 읽은 시가총액)를 덧붙이고, 아무것도 걸리지 않은 종목만 **naver-search-mcp**로 뉴스를 찾고,
 **Claude Opus 5**에 한 줄 사실 요약을 시킨 뒤, 첫 메일과 1:1로 대응하는 두 번째 메일을 보냅니다.
 
 MCP 서버는 **에이전트가 아니라 데이터 소스**입니다. 배치가 파이썬(MCP SDK stdio 클라이언트)에서 도구를 정해진 순서로 부르고,
 LLM에는 도구를 주지 않습니다. 그래서 실행이 결정적이고 비용은 하루 Claude 1회 호출로 끝납니다.
 
-> **상태: M1(DART 계층) 9/10 · SPEC v2.0(MCP 3종) 검토 중** — 2026-08-29. 규칙표를 실제 공시 3,000건으로 검증, 165건 드라이런: 🔴 8% · 🟡 8% · none 84%. 아직 배포 전.
+> **상태: M0 · M1 · M1b 완료 (32/70)** — 2026-08-29. 규칙표를 실제 공시 3,000건으로 만들고 DART 원문 12건과 대조해 확정(11/12 정확). 165건 드라이런: 🔴 8% · 🟡 8% · none 84%. 다음은 뉴스(M1c) → 본문·발송. 아직 배포 전.
 
 ## 두 번째 메일의 모양
 
@@ -39,7 +39,8 @@ LLM에는 도구를 주지 않습니다. 그래서 실행이 결정적이고 비
 ![시스템 개요](docs/arch-overview.png)
 
 - 상위 테이블(`ksa_signals` · `ksa_runs`)의 **읽기 전용 소비자**. 같은 Supabase 프로젝트의 `ksb_*` 테이블에만 씁니다.
-- 배치와 외부 API 사이에 **남이 만든 MCP 서버 3종**(`npx` · stdio · 버전 고정)이 있습니다: [korean-dart-mcp](https://github.com/chrisryugj/korean-dart-mcp)(공시 · 이상 점수 · 임원 군집), [naver-search-mcp](https://github.com/isnow890/naver-search-mcp)(뉴스), [korea-stock-mcp](https://github.com/jjlabsio/korea-stock-mcp)(시총 · 거래대금). korean-dart-mcp가 죽으면 OpenDART REST로 직접 폴백하고, 나머지 층은 생략하고 메일에 표시합니다.
+- 배치와 외부 API 사이에 **남이 만든 MCP 서버 2종**(`npx` · stdio · 버전 고정)이 있습니다: [korean-dart-mcp](https://github.com/chrisryugj/korean-dart-mcp)(공시 · 이상 점수 · 임원 군집), [naver-search-mcp](https://github.com/isnow890/naver-search-mcp)(뉴스). korean-dart-mcp가 죽으면 OpenDART REST로 직접 폴백하고, 나머지 층은 생략하고 메일에 표시합니다.
+- **시가총액은 다른 API가 아니라 상위 DB에서 읽습니다.** `krx-stock-charts`가 이미 KRX에 붙어 있어 일일 갱신 때 시가총액·상장주식수를 저장하고, 이 배치는 5일 거래대금과 함께 **SQL 한 번**으로 읽습니다 — 키도 호출도 늘지 않습니다. (처음 안이던 [korea-stock-mcp](https://github.com/jjlabsio/korea-stock-mcp)는 KRX OPEN API 키가 필요했습니다.)
 - 상위 `alert.yml` 마지막 단계의 **`repository_dispatch`**로 깨어나 신호 메일 뒤 수십 초 안에 시작합니다. 예비 cron(09:05 KST)은 dispatch가 오지 않은 날을 받쳐 주고, 이미 돌았으면 no-op입니다.
 - **LangGraph** 상태 그래프 — DB 게이트(1분 × 10회 재시도), 종목별 `Send()` fan-out으로 DART 조회, 격리된 `summarize` 노드. LLM이 죽어도 경고 한 줄을 달고 메일은 나갑니다.
 
@@ -52,7 +53,7 @@ LLM에는 도구를 주지 않습니다. 그래서 실행이 결정적이고 비
 
 ## 스택
 
-Python 3.11 + Node 20.19 · LangGraph · **MCP 파이썬 SDK**(stdio 클라이언트) · korean-dart-mcp / naver-search-mcp / korea-stock-mcp · Anthropic SDK(`claude-opus-5`, 하루 1회 일괄 호출) ·
+Python 3.11 + Node 20.19 · LangGraph · **MCP 파이썬 SDK**(stdio 클라이언트) · korean-dart-mcp / naver-search-mcp · Anthropic SDK(`claude-opus-5`, 하루 1회 일괄 호출) ·
 OpenDART REST(폴백) · Supabase(psycopg + supabase-py) · Gmail SMTP · 깃허브 Actions · pytest / ruff / mypy(strict)
 
 ## 설치
@@ -61,7 +62,7 @@ OpenDART REST(폴백) · Supabase(psycopg + supabase-py) · Gmail SMTP · 깃허
 cd krx-signal-briefing
 python3.11 -m venv venv && source venv/bin/activate
 pip install -r requirements-dev.txt
-cp .env.example .env           # DART_API_KEY · ANTHROPIC_API_KEY · 네이버 NCP 키 · KRX_API_KEY · Supabase · Gmail
+cp .env.example .env           # DART_API_KEY · ANTHROPIC_API_KEY · 네이버 NCP 키 · Supabase · Gmail
 node --version                 # 20.19+ — MCP 서버는 npx로 뜬다
 python scripts/apply_schema.py --verify   # ksb_* 테이블 생성 + anon 쓰기 차단 확인
 ```
