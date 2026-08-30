@@ -476,7 +476,7 @@ v3.0부터는 **상위가 보낸 차트 신호가 근거를 갖는지 검증한�
 
 | 항목 | 내용 |
 |------|------|
-| 도구 | `get_corporate_event(corp, event_type, bgn_de, end_de)` — `event_type`이 `flags.RULES`의 id와 거의 1:1로 대응한다 (`cb_issuance`·`bw_issuance`·`eb_issuance`·`rights_offering`·`capital_reduction`·`litigation`·`rehabilitation_filing`…) |
+| 도구 | `get_corporate_event(corp, event_type, start, end)` — **날짜 인자는 `start`/`end`다**. `bgn_de`/`end_de`로 부르면 HTTP 200에 `status:100`이 와 조용히 0건이 된다 (2026-08-30 실측) — `event_type`이 `flags.RULES`의 id와 거의 1:1로 대응한다 (`cb_issuance`·`bw_issuance`·`eb_issuance`·`rights_offering`·`capital_reduction`·`litigation`·`rehabilitation_filing`…) |
 | 대상 | **플래그된 공시만.** 정형 공시(F16)의 본문은 부르지 않는다 — 호출이 폭증하고 읽을 것도 없다. 08/26 기준 5건 |
 | 매핑 | 규칙 id → `event_type`은 **표로 고정**하고 테스트로 잠근다. 대응이 없는 규칙은 본문 없이 제목만 쓴다 |
 | 담는 값 | 발행금액 · 자금용도 · 사모/공모 · 표면·만기이자율 · 전환가액 · **전환주식 수와 발행주식 대비 비율(오버행)** · 전환청구기간 · 미상환 잔액 |
