@@ -29,6 +29,7 @@ from briefing.models import (
     Flag,
     Flow,
     Insider,
+    InvestorFlows,
     NewsItem,
     SignalRow,
 )
@@ -126,6 +127,7 @@ def briefing_for(
     *,
     flow: Flow | None = None,
     flow_skipped: bool = False,
+    investor_flows: InvestorFlows | None = None,
 ) -> Briefing:
     """종목 하나의 브리핑 — ① 공시(폴백) → ② 판정 → ③ 보조 신호·시세 → ④ 뉴스. `fetch_one`이 부른다.
 
@@ -139,6 +141,8 @@ def briefing_for(
     anomaly, insider, skipped = side_signals(corp_code, bgn, end)
     if flow_skipped:
         skipped = (*skipped, "flow")
+    if investor_flows is None or not investor_flows.days:
+        skipped = (*skipped, "investor_flows")
     v = flags.classify(raw, company_name=signal.name, insider=insider)
     # **전 종목에 붙인다** (F11 v2 · D16, v3.0). v2.0은 등급 `none`인 종목만 불렀는데,
     # 가장 값진 뉴스가 🔴 종목에서 나왔다 — 씨피시스템 CB의 자금 용도("전액 제2공장 시설투자")는
@@ -156,6 +160,7 @@ def briefing_for(
         anomaly=anomaly,
         insider=insider,
         flow=flow,
+        flows=investor_flows,
         news=news,
         bodies=bodies,
         source=source,

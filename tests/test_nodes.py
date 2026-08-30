@@ -142,7 +142,7 @@ def test_fetch_one_mcp_path_classifies_and_uses_window(sources: dict[str, Spy]) 
     b = out["briefings"][0]
     assert sources["mcp"].calls == [("00506294", RUN_DATE - timedelta(days=30), RUN_DATE)]
     assert sources["rest"].calls == []  # 폴백 없음
-    assert b.source == "mcp" and b.skipped == ()
+    assert b.source == "mcp" and b.skipped == ("investor_flows",)
     assert b.level == "red" and [f.rule for f in b.flags] == ["cb"]
     assert [d.corrected for d in b.disclosures] == [True, False]
     assert b.anomaly == ANOMALY and b.insider is not None and b.insider.signal == "none"
@@ -159,7 +159,7 @@ def test_fetch_one_falls_back_to_rest_when_mcp_fails(sources: dict[str, Spy]) ->
     assert sources["rest"].calls == [("00506294", RUN_DATE - timedelta(days=30), RUN_DATE)]
     assert b.source == "rest" and b.level == "none"  # REST 결과(분기보고서만)로 판정
     assert b.anomaly is None and b.insider is None
-    assert b.skipped == ("anomaly", "insider")  # 뉴스는 살아 있어 생략되지 않는다
+    assert b.skipped == ("anomaly", "insider", "investor_flows")  # 뉴스는 살아 있어 생략되지 않는다
     assert out["dart_calls"] == 1
 
 
@@ -177,7 +177,7 @@ def test_fetch_one_skips_only_the_failed_side_signal(sources: dict[str, Spy]) ->
     sources["anomaly"].result = ValueError("응답에 score 없음")
     sources["insider"].result = INSIDER_SELL
     b = nodes.fetch_one(fetch_item(signal=SIG))["briefings"][0]
-    assert b.anomaly is None and b.skipped == ("anomaly",)
+    assert b.anomaly is None and b.skipped == ("anomaly", "investor_flows")
     assert b.insider == INSIDER_SELL
     assert b.level == "red" and [f.rule for f in b.flags] == ["cb", "insider_sell_cluster"]
 
@@ -231,6 +231,7 @@ def test_load_market_reads_from_upstream_db(monkeypatch: pytest.MonkeyPatch) -> 
     spy = Spy({"079940": FLOW})
     monkeypatch.setattr(store, "conn", lambda: "CONN")
     monkeypatch.setattr(store, "fetch_flows", spy)
+    monkeypatch.setattr(store, "fetch_flows_30d", lambda c, t: {})
     state = initial_state(RUN_DATE)
     state["signals"] = [
         SIG,
@@ -239,7 +240,7 @@ def test_load_market_reads_from_upstream_db(monkeypatch: pytest.MonkeyPatch) -> 
     ]
     out = nodes.load_market(state)
     assert spy.calls == [("CONN", ["005930", "079940"])]  # 종목 중복 제거 · 정렬
-    assert out == {"flows": {"079940": FLOW}, "flow_skipped": ""}
+    assert out["flows"] == {"079940": FLOW} and out["flow_skipped"] == ""
 
 
 def test_load_market_skips_when_query_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -257,6 +258,7 @@ def test_load_market_marks_skipped_when_upstream_has_no_caps(
 ) -> None:
     monkeypatch.setattr(store, "conn", lambda: "CONN")
     monkeypatch.setattr(store, "fetch_flows", Spy({}))
+    monkeypatch.setattr(store, "fetch_flows_30d", lambda c, t: {})
     state = initial_state(RUN_DATE)
     state["signals"] = [SIG]
     out = nodes.load_market(state)
@@ -281,13 +283,13 @@ def test_fetch_one_attaches_flow(sources: dict[str, Spy]) -> None:
 def test_fetch_one_marks_flow_skipped(sources: dict[str, Spy]) -> None:
     """키 없음·서버 미기동 → 전 종목 `skipped`에 flow — 본문에 ⚠ 시세 참고 생략."""
     b = nodes.fetch_one(fetch_item(flow=None, flow_skipped=True))["briefings"][0]
-    assert b.flow is None and b.skipped == ("flow",)
+    assert b.flow is None and b.skipped == ("flow", "investor_flows")
 
 
 def test_fetch_one_flow_missing_but_layer_alive_is_not_skipped(sources: dict[str, Spy]) -> None:
     """시세 층은 살았는데 이 종목만 KRX에 없음(비상장·KONEX) — 생략 표기가 아니라 그냥 없음."""
     b = nodes.fetch_one(fetch_item(flow=None, flow_skipped=False))["briefings"][0]
-    assert b.flow is None and b.skipped == ()
+    assert b.flow is None and b.skipped == ("investor_flows",)
 
 
 # ── summarize (F14 · M3) ─────────────────────────────────────────

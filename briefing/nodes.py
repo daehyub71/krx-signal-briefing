@@ -120,12 +120,22 @@ def load_market(state: BriefingState) -> dict[str, Any]:
     """
     tickers = sorted({s.ticker for s in state.get("signals", [])})
     try:
-        flows = store.fetch_flows(store.conn(), tickers)
+        # `conn()`은 배치 공유 연결이다 — `with`로 닫으면 뒤 노드가 끊긴 연결을 쓴다.
+        c = store.conn()
+        flows = store.fetch_flows(c, tickers)
+        investor = store.fetch_flows_30d(c, tickers)
     except Exception as exc:  # noqa: BLE001 — 참고 층이 메일을 막지 않는다
-        print(f"[load_market] 시세 조회 실패 → 생략: {exc}")
-        return {"flows": {}, "flow_skipped": f"시세 조회 실패: {exc}"}
-    print(f"[load_market] 시세 참고 {len(flows)}/{len(tickers)}종목")
-    return {"flows": flows, "flow_skipped": "" if flows or not tickers else "상위 시총 데이터 없음"}
+        print(f"[load_market] 시세·수급 조회 실패 → 생략: {exc}")
+        return {"flows": {}, "investor_flows": {}, "flow_skipped": f"시세 조회 실패: {exc}"}
+    print(
+        f"[load_market] 시세 {len(flows)}/{len(tickers)}종목 · "
+        f"수급 {len(investor)}/{len(tickers)}종목"
+    )
+    return {
+        "flows": flows,
+        "investor_flows": investor,
+        "flow_skipped": "" if flows or not tickers else "상위 시총 데이터 없음",
+    }
 
 
 def fan_out(state: BriefingState) -> list[Send] | str:
@@ -138,6 +148,7 @@ def fan_out(state: BriefingState) -> list[Send] | str:
         return "analyze"
     corps, existing = state.get("corp_codes", {}), state.get("existing", {})
     flows, flow_skipped = state.get("flows", {}), bool(state.get("flow_skipped"))
+    investor = state.get("investor_flows", {})
     return [
         Send(
             "fetch_one",
@@ -149,6 +160,7 @@ def fan_out(state: BriefingState) -> list[Send] | str:
                 run_date=state["run_date"],
                 flow=flows.get(s.ticker),
                 flow_skipped=flow_skipped,
+                investor_flows=investor.get(s.ticker),
             ),
         )
         for s in signals
@@ -175,6 +187,7 @@ def fetch_one(item: FetchItem) -> dict[str, Any]:
             end,
             flow=item.get("flow"),
             flow_skipped=item.get("flow_skipped", False),
+            investor_flows=item.get("investor_flows"),
         )
     except dart.DartError as exc:
         print(f"[fetch_one] {s.name} [{s.ticker}] 공시 조회 실패(MCP·REST): {exc}")

@@ -90,7 +90,11 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 
 # 서술이 적은 숫자를 사실과 대조한다 (N13 v2).
 RISK_COUNT_RE = re.compile(r"위험\s*유형\s*(\d+)\s*건")
-OVERHANG_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+# 이 말이 같은 문장에 있을 때만 그 `%`를 오버행으로 본다.
+# `전환`은 단서가 못 된다 — `전환사채`·`전환가`에도 들어 있다 (2026-08-31 오탐).
+OVERHANG_WORDS: tuple[str, ...] = ("오버행", "잠재 물량", "잠재물량", "희석", "발행주식")
+# 숫자 앞뒤로 이만큼만 본다. 문장 전체를 보면 한 문장에 이자율과 오버행이 섞여 오탐이 난다.
+OVERHANG_WINDOW = 14
 
 
 def _md(d: Any) -> str:
@@ -214,14 +218,17 @@ def _miscount(text: str, ticker: str, risk_counts: dict[str, int] | None) -> int
 def _bad_overhang(text: str, ticker: str, overhangs: dict[str, set[float]] | None) -> str | None:
     """서술이 적은 `N%`가 입력의 오버행과 다르면 그 숫자를 돌려준다.
 
-    퍼센트는 오버행 말고도 등락률·지분율 등에 쓰인다. 그래서 **`오버행`·`전환` 근처의
-    퍼센트만** 본다 — 아무 `%`나 잡으면 멀쩡한 서술을 버린다.
+    퍼센트는 오버행 말고도 등락률·이자율·지분율에 쓰인다. **숫자 바로 앞뒤 좁은 창에**
+    잠재 물량을 가리키는 말이 있을 때만 본다.
+
+    문장 단위로 봤더니 "…발행주식의 18.63%… 표면이자 4.0%에…"처럼 한 문장에 둘이 섞여
+    멀쩡한 서술이 버려졌다 (2026-08-31 실호출 두 번).
     """
     if not overhangs or ticker not in overhangs or not overhangs[ticker]:
         return None
-    for m in re.finditer(r"[^.。\n]*?(\d+(?:\.\d+)?)\s*%[^.。\n]*", text):
-        clause = m.group(0)
-        if "오버행" not in clause and "전환" not in clause and "희석" not in clause:
+    for m in re.finditer(r"(\d+(?:\.\d+)?)\s*%", text):
+        near = text[max(0, m.start() - OVERHANG_WINDOW) : m.end() + OVERHANG_WINDOW]
+        if not any(w in near for w in OVERHANG_WORDS):
             continue
         said = float(m.group(1))
         if not any(abs(said - v) < 0.05 for v in overhangs[ticker]):

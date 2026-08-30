@@ -91,6 +91,7 @@ SKIP_WORDING: dict[str, str] = {
     "anomaly": "보조 신호 생략",
     "insider": "보조 신호 생략",
     "flow": "시세 참고 생략",
+    "investor_flows": "수급 생략",
     "news": "뉴스 생략",
 }
 

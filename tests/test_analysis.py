@@ -321,3 +321,35 @@ def test_trade_advice_is_still_blocked_even_next_to_a_fact() -> None:
         ok_payload("외국인 순매도가 이어진다. 지금은 매도 판단이 맞다."), ["413630"]
     )
     assert kept == {} and "매도" in dropped[0]
+
+
+def test_a_coupon_rate_beside_a_conversion_word_is_not_an_overhang() -> None:
+    """"표면이자 4.0%에 시가하락 시 전환가 조정 조항"이 버려졌다 (2026-08-31 실호출).
+
+    `전환사채`·`전환가`에도 `전환`이 있어 단서가 되지 못한다.
+    """
+    kept, _ = analysis.validate(
+        ok_payload("표면이자 4.0%에 시가하락 시 전환가 조정 조항이 붙어 있다."),
+        ["413630"],
+        overhangs={"413630": {18.63}},
+    )
+    assert kept
+
+
+def test_an_overhang_percent_is_still_checked() -> None:
+    kept, dropped = analysis.validate(
+        ok_payload("잠재 물량 9.99%가 발생한다."), ["413630"], overhangs={"413630": {18.63}}
+    )
+    assert kept == {} and "9.99" in dropped[0]
+
+
+def test_two_percentages_in_one_sentence_are_told_apart() -> None:
+    """한 문장에 오버행과 이자율이 함께 있어도 오버행만 검사한다 (2026-08-31 실호출)."""
+    said = (
+        "하나는 120억원 사모 CB로 전환가 1,519원, 발행주식 대비 18.63%다. "
+        "두 건 모두 표면이자 4.0%에 시가하락 시 전환가 조정 조항이 붙어 있다."
+    )
+    kept, dropped = analysis.validate(
+        ok_payload(said), ["413630"], overhangs={"413630": {18.63}}
+    )
+    assert kept, dropped
