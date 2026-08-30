@@ -298,3 +298,26 @@ def test_a_malformed_payload_yields_nothing() -> None:
     assert analysis.validate({"items": "x"}, ["413630"]) == ({}, [])
     kept, dropped = analysis.validate({"items": ["x"]}, ["413630"])
     assert kept == {} and dropped
+
+
+# ── 사실 표현은 금지어가 아니다 (2026-08-30 실호출) ──────────────
+
+
+def test_net_buying_and_selling_are_not_trade_advice() -> None:
+    """`순매도`가 `매도`에 걸려 분석문이 통째로 버려졌다 — 수급을 말하는 유일한 말이다."""
+    for text in (
+        "30일 기관·외국인 순매도(-8)다.",
+        "공시일에 기관이 순매수했다.",
+        "매수세가 유입됐다.",
+        "상위 20개 계좌 매수관여율 31.45%",
+    ):
+        kept, dropped = analysis.validate(ok_payload(text), ["413630"])
+        assert kept, f"버려지면 안 된다: {text} · {dropped}"
+
+
+def test_trade_advice_is_still_blocked_even_next_to_a_fact() -> None:
+    """예외는 합성어 형태에만 준다 — 판단은 그대로 막힌다."""
+    kept, dropped = analysis.validate(
+        ok_payload("외국인 순매도가 이어진다. 지금은 매도 판단이 맞다."), ["413630"]
+    )
+    assert kept == {} and "매도" in dropped[0]

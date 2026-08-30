@@ -366,10 +366,18 @@ def test_html_disclosure_title_is_the_link_not_a_separate_url_line() -> None:
     assert url not in without_hrefs
 
 
-def test_html_risky_section_comes_before_the_rest() -> None:
-    """위험 종목을 위로 올린다 — 아래로 내려가면 스크롤에 묻힌다."""
-    doc = render.html([briefing("none"), RED], D)
-    assert doc.index(render.SECTION_RISK) < doc.index(render.SECTION_REST)
+def test_html_puts_the_contradicted_stocks_first() -> None:
+    """v3.0은 등급이 아니라 **판정**으로 구역을 나눈다 (DESIGN §8).
+
+    물음이 "위험이 있나"에서 "근거가 받치나"로 바뀌었다.
+    """
+    from briefing import verdict as vd
+
+    calm = Briefing.from_signal(sig("227950", "엔투텍"), "2", "none")
+    bs = [calm, RED]
+    vs = {calm.ticker: vd.Verdict("정합", 68), RED.ticker: vd.Verdict("불일치", 20)}
+    doc = render.html(bs, D, verdicts=vs)
+    assert doc.index(render.SECTION_AGAINST) < doc.index(render.SECTION_REST_V3)
 
 
 def test_html_compact_card_caps_disclosures_and_says_how_many_were_left_out() -> None:
@@ -456,9 +464,10 @@ def test_html_shows_the_summary_when_present() -> None:
     assert "최근 30일 공시는 정기보고서뿐입니다" in doc
 
 
-def test_html_reports_a_summary_failure_without_hiding_the_disclosures() -> None:
+def test_html_reports_an_analysis_failure_without_hiding_the_evidence() -> None:
+    """LLM이 죽어도 판정·공시·수급은 그대로 나간다 (F18·F19)."""
     doc = render.html([RED], D, summary_error="rate_limit")
-    assert "요약 생성 실패" in doc and CB.report_nm in doc
+    assert "근거 서술 생략" in doc and CB.report_nm in doc
 
 
 def test_html_flag_labels_cover_every_rule() -> None:
@@ -531,18 +540,13 @@ def test_html_handles_unknown_and_error_levels() -> None:
     assert render.UNKNOWN_WORDING in docs and render.ERROR_WORDING in docs
 
 
-def test_html_compact_card_counts_conditions_actually_met() -> None:
-    """`5/5`는 전부 충족했을 때만이다 — 전체 개수를 두 번 적으면 항상 만점이 된다."""
-    ev = {
-        "conditions": [
-            {"label": "월봉 종가 > MA20", "ok": True, "actual": "a"},
-            {"label": "일봉 종가 > MA20", "ok": False, "actual": "b"},
-        ],
-        "price": {"close": 100, "change_pct": 0.5},
-    }
-    s = SignalRow(d=D, strategy="mtf", ticker="079940", name="가비아", evidence=ev)
-    doc = render.html([Briefing.from_signal(s, "1", "none")], D)
-    assert "신호 조건 1/2" in doc and "2/2" not in doc
+def test_html_head_band_carries_the_verdict_not_the_condition_count() -> None:
+    """v3.0의 머리 밴드는 **판정**을 싣는다 — 조건 충족 수는 전문 페이지로 갔다 (DESIGN §8)."""
+    from briefing import verdict as vd
+
+    b = briefing("none")
+    doc = render.html([b], D, verdicts={b.ticker: vd.Verdict("정합", 68)})
+    assert "정합 68점" in doc
 
 
 def test_html_stays_within_the_budget_by_folding_compact_cards_last() -> None:
@@ -618,15 +622,19 @@ def test_block_has_a_rule_between_the_signal_and_our_findings() -> None:
     assert i_cond < i_rule < i_grade
 
 
-def test_every_disclosure_carries_its_source_link(subtests: object = None) -> None:
-    """**원문 링크 필수** (N2) — 평문은 URL로, HTML은 제목에 건 앵커로."""
+def test_every_shown_disclosure_carries_its_source_link() -> None:
+    """**원문 링크 필수** (N2) — 평문은 URL로, HTML은 제목에 건 앵커로.
+
+    v3.0부터 정형 공시(`분기보고서`)는 HTML에서 한 줄로 접힌다 (F16) — 접힌 것은
+    링크가 없지만 **건수는 항상 보인다.** 평문은 접지 않는다.
+    """
     b = briefing("amber", disclosures=(CB, QUARTERLY))
     body = render.text([b], D)
     for d in (CB, QUARTERLY):
         assert dart_link(d.rcept_no) in body
     doc = render.html([b], D)
-    for d in (CB, QUARTERLY):
-        assert f'<a href="{dart_link(d.rcept_no)}"' in doc
+    assert f'<a href="{dart_link(CB.rcept_no)}"' in doc
+    assert render.FOLDED_WORDING.format(n=1) in doc
 
 
 # ── R8: evidence가 흔들려도 줄만 비운다 ──────────────────────────
@@ -639,7 +647,8 @@ def test_missing_evidence_empties_the_lines_but_keeps_the_block() -> None:
     assert "가비아 [079940]" in body  # 종목 줄은 남는다
     assert "원 +" not in body  # 종가·등락은 비었다
     assert not [ln for ln in body.splitlines() if ln.strip().startswith(("✓", "✗"))]
-    assert QUARTERLY.report_nm in render.html([b], D)
+    # 분기보고서는 정형이라 HTML에서 접힌다 (F16) — 접힌 건수로 확인한다.
+    assert render.FOLDED_WORDING.format(n=1) in render.html([b], D)
 
 
 def test_null_evidence_does_not_kill_the_mail() -> None:
@@ -679,3 +688,46 @@ def test_conditions_that_are_not_a_list_are_ignored() -> None:
     b = Briefing.from_signal(sig_ev({"conditions": "정배열"}), "1", "amber")
     body = render.text([b], D)
     assert not [ln for ln in body.splitlines() if ln.strip().startswith(("✓", "✗"))]
+
+
+def test_a_real_sized_v3_mail_leaves_room(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v3.0은 카드에 본문 표·수급 표가 늘었다. 예산이 헐거우면 한계에 29 bytes까지 붙는다
+    (2026-08-30 실측 102,371). 여유가 남는지 실제 `EmailMessage` 크기로 본다."""
+    from email.message import EmailMessage
+
+    from briefing import verdict as vd
+    from briefing.models import EventBody, FlowDay, InvestorFlows
+
+    long_reason = "가" * 600
+    body = EventBody(
+        rcept_no=CB.rcept_no, event_type="cb_issuance", amount=10_000_000_000,
+        use_of_funds=(("시설자금", 10_000_000_000),), method="사모", coupon_rate=0.0,
+        conv_price=5106, overhang_pct=5.10, outstanding=23_420_000_000,
+    )
+    flows = InvestorFlows(
+        days=tuple(FlowDay(d=date(2026, 8, d), inst=1, foreign=-2, indiv=3) for d in range(1, 29))
+    )
+    bs = [
+        briefing(
+            "red", disclosures=(CB, QUARTERLY), flags=RED.flags, bodies=(body,),
+            news=NEWS, flows=flows, summary=long_reason,
+        )
+        for _ in range(15)
+    ]
+    vs = {b.ticker: vd.Verdict("불일치", 23) for b in bs}
+    msg = EmailMessage()
+    msg["Subject"] = render.subject(bs, D)
+    msg["From"] = "a@example.com"
+    msg["To"] = "b@example.com"
+    msg.set_content(render.text(bs, D))
+    msg.add_alternative(render.html(bs, D, verdicts=vs, page_url="https://x/y"), subtype="html")
+    size = len(bytes(msg))
+    # 이것은 **최악의 날**이다 — 15종목이 전부 불일치, 서술 600자, 조건 6줄.
+    # 실제 08/26치는 77,560 bytes(여유 24%)였다. 최악에서도 10% 남아야 한다.
+    assert size < render.GMAIL_CLIP_BYTES * 0.90, f"{size:,} bytes — 여유가 없다"
+    # 접힌 것은 조용히 사라지지 않는다.
+    doc = render.html(bs, D, verdicts=vs, page_url="https://x/y")
+    assert "접었습니다" in doc
+    # **어느 단계에서도 빠지지 않는 것** (R20)
+    assert render.SCORE_LIMIT_NOTE.split(" — ")[0] in doc
+    assert render.LIMIT_NOTE in doc

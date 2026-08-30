@@ -243,7 +243,14 @@ def render(state: BriefingState) -> dict[str, Any]:
     return {
         "subject": rendering.subject(briefings, d, stale=stale),
         "text": rendering.text(briefings, d, stale=stale, summary_error=err),
-        "html": rendering.html(briefings, d, stale=stale, summary_error=err),
+        "html": rendering.html(
+            briefings,
+            d,
+            verdicts=state.get("verdicts", {}),
+            page_url=state.get("page_url", ""),
+            stale=stale,
+            summary_error=err,
+        ),
     }
 
 

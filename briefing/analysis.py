@@ -28,7 +28,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from briefing.models import Briefing
-from briefing.render import FORBIDDEN
+from briefing.render import has_forbidden
 from briefing.verdict import STANDS, Verdict
 
 MAX_LEN = 2000  # 종목당 상한 (F19·D19). **목표가 아니다** (R21)
@@ -272,7 +272,7 @@ def validate(
             dropped.append(f"{ticker}: 빈 문자열")
         elif len(text) > MAX_LEN:
             dropped.append(f"{ticker}: 길이 {len(text)}자 > {MAX_LEN}")
-        elif hit := next((w for w in FORBIDDEN if w in text), ""):
+        elif hit := has_forbidden(text):
             dropped.append(f"{ticker}: 금지어 '{hit}'")
         elif bad_stand := _wrong_stand(text, ticker, stands):
             dropped.append(f"{ticker}: 판정을 '{bad_stand}'로 바꿔 씀 — 코드 판정과 다르다")

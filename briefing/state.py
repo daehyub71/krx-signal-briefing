@@ -88,6 +88,7 @@ class BriefingState(TypedDict, total=False):
     # 요약 (F14)
     summaries: dict[str, str]       # briefing_key → 근거 서술 (F19)
     verdicts: dict[str, Any]        # ticker → Verdict (F18). 코드가 낸다 — LLM이 못 바꾼다
+    page_url: str                   # 전문 페이지 주소 (F20). 실패하면 빈 문자열
     summary_error: str
     llm_tokens: int
 
@@ -126,6 +127,7 @@ def initial_state(run_date: date, *, dry_run: bool = False, force: bool = False)
         dart_calls=0,
         summaries={},
         verdicts={},
+        page_url="",
         summary_error="",
         llm_tokens=0,
         subject="",
