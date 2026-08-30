@@ -18,7 +18,17 @@ import psycopg
 from supabase import Client, create_client
 
 from briefing import config
-from briefing.models import Briefing, Disclosure, Flag, Flow, RunRecord, SignalRow
+from briefing.models import (
+    Anomaly,
+    Briefing,
+    Disclosure,
+    Flag,
+    Flow,
+    Insider,
+    NewsItem,
+    RunRecord,
+    SignalRow,
+)
 
 _conn: psycopg.Connection[Any] | None = None
 
@@ -174,18 +184,79 @@ def fetch_signals(c: psycopg.Connection[Any], d: date) -> list[SignalRow]:
 # ── ksb_briefings ───────────────────────────────────────────────
 
 
+def _anomaly_of(raw: dict[str, Any] | None) -> Anomaly | None:
+    """`ksb_briefings.anomaly` jsonb → 모델. 예전 행에는 null이 들어 있다."""
+    if not raw:
+        return None
+    return Anomaly(
+        score=int(raw.get("score", 0)),
+        verdict=str(raw.get("verdict", "")),
+        summary=str(raw.get("summary", "")),
+        flags=tuple(raw.get("flags") or ()),
+    )
+
+
+def _insider_of(raw: dict[str, Any] | None) -> Insider | None:
+    if not raw:
+        return None
+    return Insider(
+        signal=str(raw.get("signal", "")),
+        buy_events=int(raw.get("buy_events", 0)),
+        sell_events=int(raw.get("sell_events", 0)),
+        unique_buyers=int(raw.get("unique_buyers", 0)),
+        unique_sellers=int(raw.get("unique_sellers", 0)),
+        net_change_shares=int(raw.get("net_change_shares", 0)),
+        summary=str(raw.get("summary", "")),
+    )
+
+
+def _flow_of(raw: dict[str, Any] | None) -> Flow | None:
+    if not raw:
+        return None
+    return Flow(
+        bas_dd=str(raw.get("bas_dd", "")),
+        close=int(raw.get("close", 0)),
+        mktcap=int(raw.get("mktcap", 0)),
+        list_shrs=int(raw.get("list_shrs", 0)),
+        trdval_5d=int(raw.get("trdval_5d", 0)),
+        days=int(raw.get("days", 0)),
+    )
+
+
+def _news_of(raw: list[dict[str, Any]] | None) -> tuple[NewsItem, ...]:
+    return tuple(
+        NewsItem(
+            title=str(n.get("title", "")),
+            link=str(n.get("link", "")),
+            origin=str(n.get("origin", "")),
+            published=date.fromisoformat(n["published"]) if n.get("published") else None,
+        )
+        for n in raw or ()
+    )
+
+
 def fetch_briefings(c: psycopg.Connection[Any], d: date) -> dict[str, Briefing]:
     """그날 이미 있는 브리핑 — 멱등 판단용 (N6). 키는 `briefing_key`와 같은 형식.
 
-    저장된 것을 그대로 되살리지는 않는다(공시 목록만 복원). 다시 부르지 않는 것이 목적이다.
+    **`to_row()`가 쓰는 열을 전부 되살린다.** 예전에는 공시 목록까지만 복원했는데,
+    재실행에서 `fetch_one`이 그 반쪽 브리핑을 돌려주고 `persist`가 그대로 덮어써
+    **뉴스·anomaly·flow가 지워졌다** (2026-08-30, 15종목 실제 소실).
+    되살리는 열이 저장하는 열보다 적으면 재실행이 그 차이만큼 지운다 —
+    `tests/test_store.py`의 왕복 테스트가 이 계약을 잠근다. 열을 늘릴 때 여기도 함께 늘린다.
+
+    `conditions`·`close`·`change_pct`는 열이 아니다 — 상위 `evidence`에서 매번 새로 온다.
     """
     rows = c.execute(
         "select d, strategy, ticker, name, corp_code, level, flags, disclosures,"
-        " window_days, summary from ksb_briefings where d = %s",
+        " window_days, summary, anomaly, insider, flow, news"
+        " from ksb_briefings where d = %s",
         (d,),
     ).fetchall()
     out: dict[str, Briefing] = {}
-    for dd, st, t, name, code, level, flags, discs, window, summ in rows:
+    for (
+        dd, st, t, name, code, level, flags, discs, window, summ,
+        anomaly, insider, flow, news,
+    ) in rows:
         out[f"{st}:{t}"] = Briefing(
             d=dd,
             strategy=str(st),
@@ -214,6 +285,10 @@ def fetch_briefings(c: psycopg.Connection[Any], d: date) -> dict[str, Briefing]:
             ),
             window_days=int(window),
             summary=summ,
+            anomaly=_anomaly_of(anomaly),
+            insider=_insider_of(insider),
+            flow=_flow_of(flow),
+            news=_news_of(news),
         )
     return out
 
