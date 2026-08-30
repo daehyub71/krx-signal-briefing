@@ -21,6 +21,7 @@ import html
 import re
 import threading
 import time
+from collections.abc import Sequence
 from datetime import date
 from email.utils import parsedate_to_datetime
 from typing import Any, Protocol
@@ -30,8 +31,10 @@ from briefing.models import NewsItem
 
 TIMEOUT = 20.0
 DISPLAY = 5  # 종목당 최대 건수. 늘리면 요약 입력과 메일이 길어진다
-SORT = "date"  # 최신순 — 신호가 난 날 근처의 움직임을 본다
-QUERY_SUFFIX = "주가"  # 종목명만으로는 동음이의가 섞인다 (실측)
+SORT = "sim"  # 관련도순 (F11 v2). 최신순은 매일 쏟아지는 자동 생성 시세 기사가 상위를 채운다
+# 검색어는 **종목명만** 쓴다 (F11 v2, 2026-08-30 A/B 실측).
+# `{종목명} 주가` + 최신순: 제목 적합도 64% · `{종목명}` + 관련도순: **95%**.
+# 동음이의는 검색어가 아니라 `about()`의 제목 필터로 거른다.
 
 # 네이버는 초당 호출을 제한한다 — fan-out 15종목이 몰리면 HTTP 429가 난다 (2026-08-29 실측).
 # 일일 한도(25,000)와는 다른 것이라 간격만 두면 해소된다.
@@ -78,14 +81,38 @@ def parse_news(payload: dict[str, Any]) -> list[NewsItem]:
                 link=link,
                 origin=str(raw.get("originallink", "")).strip(),
                 published=parse_pub_date(str(raw.get("pubDate", ""))),
+                summary=clean_text(str(raw.get("description", ""))),
             )
         )
     return out
 
 
 def query_for(company_name: str) -> str:
-    """종목명 → 검색어. `주가`를 붙여 동음이의를 줄인다."""
-    return f"{company_name} {QUERY_SUFFIX}".strip()
+    """종목명 → 검색어 (F11 v2). **종목명만** 쓴다.
+
+    `주가`를 붙이던 v2.0은 자동 생성 시세 기사(`… 주가, 8월 24일 장중 5,170원 2.78% 상승`)를
+    끌어와 적합도가 64%였다. 종목명만 + 관련도순이 95%다 (2026-08-30 A/B 실측).
+    """
+    return company_name.strip()
+
+
+def about(items: Sequence[NewsItem], company_name: str) -> list[NewsItem]:
+    """제목에 종목명이 없는 기사를 버린다 (F11 v2 — 동음이의·계열사 차단, R17).
+
+    `LG`로 검색하면 야구단(`부산 LG-롯데전`)과 계열사(`LG이노텍 주가`) 기사가 섞인다.
+    검색어를 좁히는 대신 **결과를 좁힌다** — 검색어를 좁히면 정작 필요한 기사도 빠진다.
+
+    제목에서 공백을 지우고 비교한다: `한올바이오파마`가 `한올 바이오파마`로 쓰이기도 한다.
+
+    Args:
+        items: 파싱된 뉴스.
+        company_name: 종목명.
+
+    Returns:
+        제목에 종목명이 든 기사만. 0건일 수 있다 — 0건과 "층이 죽었다"는 다르다.
+    """
+    needle = _WS.sub("", company_name)
+    return [n for n in items if needle and needle in _WS.sub("", n.title)]
 
 
 def _wait_turn() -> None:
@@ -107,7 +134,7 @@ def fetch_news(company_name: str, *, server: _Server | None = None) -> list[News
     args = {"query": query_for(company_name), "display": DISPLAY, "sort": SORT}
     _wait_turn()
     try:
-        return parse_news(srv.call_json("search_news", args, timeout=TIMEOUT))
+        return about(parse_news(srv.call_json("search_news", args, timeout=TIMEOUT)), company_name)
     except mcpc.McpCallError as exc:
         if "429" not in str(exc):
             raise

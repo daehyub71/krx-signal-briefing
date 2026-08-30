@@ -10,7 +10,7 @@ import json
 import time
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -109,25 +109,25 @@ def test_parse_news_skips_items_without_title_or_link() -> None:
 def test_news_item_to_json_round_trip() -> None:
     item = parse_news(SAMPLE)[0]
     row = item.to_json()
-    assert set(row) == {"title", "link", "origin", "published"}
+    assert set(row) == {"title", "link", "origin", "published", "summary"}
     assert row["published"] == "2026-08-28"
 
 
 # ── 호출 ─────────────────────────────────────────────────────────
 
 
-def test_query_appends_price_word() -> None:
-    """종목명만 넣으면 동음이의가 섞인다 — 실측: `핑거` 3/3 무관, `핑거 주가`는 전환사채 기사."""
-    assert news_mcp.query_for("가비아") == "가비아 주가"
+def test_query_is_the_name_alone_since_v2() -> None:
+    """v2.0은 `주가`를 붙였다. 2026-08-30 A/B에서 그쪽 적합도가 64%로 더 낮았다 —
+    자동 생성 시세 기사가 상위를 채웠기 때문이다. 동음이의는 `about()`이 거른다."""
+    assert news_mcp.query_for("가비아") == "가비아"
 
 
 def test_fetch_news_calls_search_news_with_pinned_args() -> None:
     srv = FakeServer(SAMPLE)
-    items = fetch_news("가비아", server=srv)
-    assert len(items) == news_mcp.DISPLAY
+    fetch_news("가비아", server=srv)
     tool, args, timeout = srv.calls[0]
     assert tool == "search_news"
-    assert args == {"query": "가비아 주가", "display": news_mcp.DISPLAY, "sort": "date"}
+    assert args == {"query": "가비아", "display": news_mcp.DISPLAY, "sort": "sim"}
     assert timeout == news_mcp.TIMEOUT
 
 
@@ -179,3 +179,95 @@ def test_calls_are_paced(monkeypatch: pytest.MonkeyPatch) -> None:
     news_mcp._last_call = 100.0
     fetch_news("가비아", server=FakeServer(SAMPLE))
     assert slept and slept[0] == pytest.approx(news_mcp.MIN_INTERVAL)
+
+
+# ── F11 v2 (v3.0, 2026-08-30) ────────────────────────────────────
+#
+# 실측이 바꾼 것들. `{종목명} 주가` + 최신순은 제목 적합도가 **64%**였고,
+# 자동 생성 시세 기사가 상위를 채웠다. `{종목명}` + 관련도순은 **95%**다.
+# 그리고 네이버가 주는 `description`(기사 요약 ~100자)을 v2.0은 받고서 버렸다 —
+# 그것이 분석의 주재료다 (씨피시스템 CB의 자금 용도가 거기 있었다).
+
+REAL_ITEM = {
+    "title": "<b>씨피시스템</b>, 100억 규모 CB 발행…전액 제2공장 투입",
+    "originallink": "https://www.newsis.com/view/NISX20260826_0003763415",
+    "link": "https://n.news.naver.com/mnews/article/003/0014149387?sid=101",
+    "description": (
+        "첨단산업용 케이블체인 전문기업 <b>씨피시스템</b>은 100억원 규모의 전환사채(CB) "
+        "발행을 결정했다고 26일 밝혔다. 회사 측에 따르면 조달자금은 전액 제2공장 설립에 "
+        "필요한 생산설비 등 시설투자에 사용될 예정이다. 발행... "
+    ),
+    "pubDate": "Wed, 26 Aug 2026 13:51:00 +0900",
+}
+
+
+def test_query_is_the_company_name_alone() -> None:
+    """`주가`를 붙이면 자동 생성 시세 기사가 상위를 채운다 (적합도 64% → 95%)."""
+    assert news_mcp.query_for("씨피시스템") == "씨피시스템"
+
+
+def test_sort_is_by_relevance_not_recency() -> None:
+    """최신순은 매일 쏟아지는 시세 기사를 먼저 준다."""
+    assert news_mcp.SORT == "sim"
+
+
+def test_description_is_kept_and_cleaned() -> None:
+    """기사 요약이 분석의 주재료다 — v2.0은 받고서 버렸다."""
+    (item,) = news_mcp.parse_news({"items": [REAL_ITEM]})
+    assert "100억원 규모의 전환사채(CB) 발행을 결정" in item.summary
+    assert "전액 제2공장 설립" in item.summary
+    assert "<b>" not in item.summary
+
+
+def test_title_is_still_cleaned() -> None:
+    (item,) = news_mcp.parse_news({"items": [REAL_ITEM]})
+    assert item.title == "씨피시스템, 100억 규모 CB 발행…전액 제2공장 투입"
+
+
+def test_an_item_without_a_description_is_still_kept() -> None:
+    """요약이 없다고 기사를 버리지는 않는다 — 제목과 링크가 본체다."""
+    (item,) = news_mcp.parse_news({"items": [{**REAL_ITEM, "description": ""}]})
+    assert item.summary == "" and item.title
+
+
+# ── 제목 필터 — 계열사·동음이의를 걸러 낸다 ──────────────────────
+
+
+def test_keeps_only_articles_whose_title_names_the_company() -> None:
+    """`LG`로 검색하면 야구단·계열사 기사가 섞인다 (실측)."""
+    items = [
+        {"title": "<b>LG</b>전자, 3분기 영업이익 발표", "link": "https://n/1"},
+        {"title": "부산 LG-롯데전, 우천 노게임", "link": "https://n/2"},
+        {"title": "코스피 상승 마감", "link": "https://n/3"},
+    ]
+    kept = news_mcp.about(news_mcp.parse_news({"items": items}), "LG")
+    assert [n.link for n in kept] == ["https://n/1", "https://n/2"]  # 제목에 LG가 있는 둘
+
+
+def test_the_filter_ignores_spaces_in_the_company_name() -> None:
+    """`한올바이오파마`가 제목에서 `한올 바이오파마`로 띄어 쓰이기도 한다."""
+    items = [{"title": "한올 바이오파마, 임상 3상 진입", "link": "https://n/1"}]
+    kept = news_mcp.about(news_mcp.parse_news({"items": items}), "한올바이오파마")
+    assert len(kept) == 1
+
+
+def test_the_filter_drops_everything_when_nothing_matches() -> None:
+    """0건과 '층이 죽었다'는 다르다 — 0건은 그냥 0건이다."""
+    items = [{"title": "코스피 상승 마감", "link": "https://n/1"}]
+    assert news_mcp.about(news_mcp.parse_news({"items": items}), "씨피시스템") == []
+
+
+def test_fetch_news_applies_the_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Srv:
+        def call_json(
+            self, tool: str, args: dict[str, object], timeout: float
+        ) -> dict[str, object]:
+            self.args = args
+            return {"items": [REAL_ITEM, {"title": "코스피 상승 마감", "link": "https://n/9"}]}
+
+    srv = Srv()
+    monkeypatch.setattr(news_mcp, "_wait_turn", lambda: None)
+    out = news_mcp.fetch_news("씨피시스템", server=cast("Any", srv))
+    assert [n.link for n in out] == [REAL_ITEM["link"]]
+    assert srv.args["query"] == "씨피시스템"
+    assert srv.args["sort"] == "sim"

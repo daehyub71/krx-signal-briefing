@@ -215,6 +215,7 @@ class NewsItem:
     link: str  # 네이버 뉴스 링크
     origin: str = ""  # 원문(언론사) 링크
     published: date | None = None
+    summary: str = ""  # 기사 요약 (네이버 `description`, ~100자) — F11 v2, v3.0
 
     def to_json(self) -> dict[str, Any]:
         """jsonb에 넣을 형태."""
@@ -223,6 +224,7 @@ class NewsItem:
             "link": self.link,
             "origin": self.origin,
             "published": self.published.isoformat() if self.published else None,
+            "summary": self.summary,
         }
 
 
@@ -253,6 +255,70 @@ class Flow:
             "list_shrs": self.list_shrs,
             "trdval_5d": self.trdval_5d,
             "days": self.days,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class EventBody:
+    """플래그된 공시의 **본문** (SPEC F15, v3.0).
+
+    `report_nm` 한 줄로는 무슨 일인지 알 수 없다. korean-dart-mcp `get_corporate_event`가
+    주는 구조화 본문을 여기에 담는다. 값이 없으면 `None` — 사채가 아닌 사건에는
+    전환가·오버행이 없다.
+
+    같은 공시가 이렇게 달라진다 (2026-08-26 실측):
+
+    | | 씨피시스템 | 엔투텍 |
+    |---|---|---|
+    | 제목 | `주요사항보고서(전환사채권발행결정)` | 같은 제목 |
+    | 금액 | 100억 | 120억 |
+    | 자금용도 | 시설자금 전액 | 타법인 증권 취득 |
+    | 이자 | 0.0% / 0.0% | 4% / 4% |
+    | **오버행** | **5.10%** | **18.63%** |
+    | 미상환 잔액 | 234억 | **4,891억** |
+
+    오버행 비율(`overhang_pct`)이 이 모델의 핵심이다. 잠재 물량이 발행주식의 5%인지
+    19%인지는 같은 "전환사채 발행" 안에서 전혀 다른 사실이다.
+    """
+
+    rcept_no: str
+    event_type: str  # cb_issuance · bw_issuance · rights_offering …
+    decided_on: str = ""  # 이사회 결의일 (원문 표기 그대로)
+    amount: int | None = None  # 발행·조달 금액(원)
+    use_of_funds: tuple[tuple[str, int], ...] = ()  # (용도, 금액) — 비어 있으면 미기재
+    kind: str = ""  # 사채의 종류 (`무보증 사모 전환사채` 등)
+    method: str = ""  # 사모 / 공모
+    coupon_rate: float | None = None  # 표면이자율(%)
+    ytm_rate: float | None = None  # 만기이자율(%)
+    maturity: str = ""  # 만기일
+    conv_price: int | None = None  # 전환가액(원)
+    conv_shares: int | None = None  # 전환 가능 주식수
+    overhang_pct: float | None = None  # 발행주식총수 대비 비율(%) — **잠재 물량**
+    conv_from: str = ""  # 전환청구 시작일
+    conv_to: str = ""  # 전환청구 종료일
+    outstanding: int | None = None  # 미상환 사채 잔액(원)
+    refix_floor: int | None = None  # 전환가액 하향조정 하한(원)
+
+    def to_json(self) -> dict[str, Any]:
+        """jsonb에 넣을 형태 (`ksb_briefings.bodies`)."""
+        return {
+            "rcept_no": self.rcept_no,
+            "event_type": self.event_type,
+            "decided_on": self.decided_on,
+            "amount": self.amount,
+            "use_of_funds": [list(x) for x in self.use_of_funds],
+            "kind": self.kind,
+            "method": self.method,
+            "coupon_rate": self.coupon_rate,
+            "ytm_rate": self.ytm_rate,
+            "maturity": self.maturity,
+            "conv_price": self.conv_price,
+            "conv_shares": self.conv_shares,
+            "overhang_pct": self.overhang_pct,
+            "conv_from": self.conv_from,
+            "conv_to": self.conv_to,
+            "outstanding": self.outstanding,
+            "refix_floor": self.refix_floor,
         }
 
 
@@ -296,7 +362,8 @@ class Briefing:
     anomaly: Anomaly | None = None  # F4b 보조 신호 (v2.0). None = 생략됨
     insider: Insider | None = None  # F4b 보조 신호 (v2.0). None = 생략됨
     flow: Flow | None = None  # F12 시세 참고 (v2.0). None = 생략됨
-    news: tuple[NewsItem, ...] = ()  # F11 뉴스 (등급 none인 종목만). 빈 튜플 = 없음·생략
+    news: tuple[NewsItem, ...] = ()  # F11 뉴스. 빈 튜플 = 없음·생략
+    bodies: tuple[EventBody, ...] = ()  # F15 공시 본문 (플래그된 공시만, v3.0)
     # 아래 넷은 상위 evidence에서 그대로 온 표시용 값이다 (열이 아니다 — 렌더가 쓴다)
     conditions: tuple[tuple[str, bool, str], ...] = ()
     close: int = 0
@@ -320,6 +387,7 @@ class Briefing:
         insider: Insider | None = None,
         flow: Flow | None = None,
         news: tuple[NewsItem, ...] = (),
+        bodies: tuple[EventBody, ...] = (),
         summary: str | None = None,
         source: str = "mcp",
         skipped: tuple[str, ...] = (),
@@ -343,6 +411,7 @@ class Briefing:
             insider=insider,
             flow=flow,
             news=news,
+            bodies=bodies,
             summary=summary,
             source=source,
             skipped=skipped,
@@ -378,6 +447,7 @@ class Briefing:
             "insider": self.insider.to_json() if self.insider else None,
             "flow": self.flow.to_json() if self.flow else None,
             "news": [n.to_json() for n in self.news] if self.news else None,
+            "bodies": [b.to_json() for b in self.bodies],
         }
 
 
