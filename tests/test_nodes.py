@@ -288,3 +288,126 @@ def test_fetch_one_flow_missing_but_layer_alive_is_not_skipped(sources: dict[str
     """시세 층은 살았는데 이 종목만 KRX에 없음(비상장·KONEX) — 생략 표기가 아니라 그냥 없음."""
     b = nodes.fetch_one(fetch_item(flow=None, flow_skipped=False))["briefings"][0]
     assert b.flow is None and b.skipped == ()
+
+
+# ── summarize (F14 · M3) ─────────────────────────────────────────
+#
+# LLM은 **있으면 좋은 층**이다. 이 묶음의 절반은 "없어도 메일이 간다"를 증명하는 데 쓴다.
+
+from typing import Any  # noqa: E402
+
+from briefing import llm  # noqa: E402
+from briefing.state import briefing_key  # noqa: E402
+
+
+def brief(ticker: str = "079940", name: str = "가비아", **kw: object) -> Briefing:
+    base: dict[str, object] = {
+        "signal": SignalRow(d=date(2026, 8, 25), strategy="mtf", ticker=ticker, name=name,
+                            evidence={}),
+        "corp_code": "00506294",
+        "level": "red",
+        "disclosures": (
+            Disclosure(rcept_dt=date(2026, 8, 22), report_nm="전환사채권발행결정",
+                       rcept_no="1", flr_nm=name),
+        ),
+    }
+    base.update(kw)
+    return Briefing.from_signal(**base)  # type: ignore[arg-type]
+
+
+def st(**kw: object) -> dict[str, object]:
+    s = initial_state(date(2026, 8, 26))
+    s.update(kw)  # type: ignore[typeddict-item]
+    return dict(s)
+
+
+def fake_reply(payload: dict[str, Any]) -> llm.Reply:
+    return llm.Reply(payload=payload, usage=llm.Usage(input_tokens=5100, output_tokens=420))
+
+
+def test_summarize_keeps_valid_lines_and_records_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    b = brief()
+    said = {"items": [{"ticker": "079940", "summary": "08/22 전환사채 발행 결정"}]}
+    monkeypatch.setattr(llm, "summarize", lambda items: fake_reply(said))
+    out = nodes.summarize(cast("Any", st(briefings=[b])))
+    assert out["summaries"] == {briefing_key("mtf", "079940"): "08/22 전환사채 발행 결정"}
+    assert out["llm_tokens"] == 5520
+    assert not out.get("summary_error")
+
+
+def test_summarize_drops_only_the_line_that_breaks_a_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+    """금지어가 든 한 줄만 버린다 — 나머지 종목의 요약은 남는다 (N13)."""
+    good, bad = brief(), brief("227950", "엔투텍")
+    monkeypatch.setattr(
+        llm, "summarize",
+        lambda items: fake_reply({"items": [
+            {"ticker": "079940", "summary": "08/22 전환사채 발행 결정"},
+            {"ticker": "227950", "summary": "지금이 매수 시점이다"},
+        ]}),
+    )
+    out = nodes.summarize(cast("Any", st(briefings=[good, bad])))
+    assert list(out["summaries"]) == [briefing_key("mtf", "079940")]
+
+
+def test_summarize_swallows_a_missing_key_and_names_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """키가 없어도 메일은 간다 (R12). 예외가 새면 그날 메일이 통째로 사라진다."""
+    def boom(items: object) -> object:
+        raise llm.LlmUnavailable("ANTHROPIC_API_KEY 없음")
+
+    monkeypatch.setattr(llm, "summarize", boom)
+    out = nodes.summarize(cast("Any", st(briefings=[brief()])))
+    assert "ANTHROPIC_API_KEY" in out["summary_error"]
+    assert out.get("summaries", {}) == {}
+
+
+@pytest.mark.parametrize(
+    "exc", [llm.LlmError("모델이 응답을 거부했다"), RuntimeError("생각지 못한 것")]
+)
+def test_summarize_never_raises(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
+    """`LlmError`든 아니든 예외는 밖으로 나가지 않는다 — `record_run`에 못 가면 기록이 사라진다."""
+    def boom(items: object) -> object:
+        raise exc
+
+    monkeypatch.setattr(llm, "summarize", boom)
+    out = nodes.summarize(cast("Any", st(briefings=[brief()])))
+    assert out["summary_error"]
+
+
+def test_summarize_does_not_call_the_model_when_there_is_nothing_to_summarize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """공시를 못 본 종목뿐이면 부르지 않는다 — 돈이 든다."""
+    called = []
+    monkeypatch.setattr(llm, "summarize", lambda items: called.append(items))
+    out = nodes.summarize(cast("Any", st(briefings=[brief(level="unknown", disclosures=())])))
+    assert called == [] and out == {}
+
+
+def test_summarize_skips_a_briefing_that_already_has_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """멱등 (N6) — 어제 만든 요약을 다시 사겠다고 LLM을 부르지 않는다."""
+    called = []
+    monkeypatch.setattr(llm, "summarize", lambda items: called.append(items))
+    out = nodes.summarize(cast("Any", st(briefings=[brief(summary="이미 있다")])))
+    assert called == [] and out == {}
+
+
+# ── 요약이 본문·저장까지 흘러가는가 ──────────────────────────────
+
+
+def test_summaries_reach_the_rendered_body() -> None:
+    b = brief()
+    key = briefing_key("mtf", "079940")
+    out = nodes.render(cast("Any", st(briefings=[b], signals=[], summaries={key: "요약 한 줄"},
+                                      data_date=date(2026, 8, 26))))
+    assert "요약 한 줄" in out["html"]
+    assert "요약 한 줄" in out["text"]
+
+
+def test_summaries_reach_the_saved_row() -> None:
+    """`ksb_briefings.summary`에 남아야 내일 다시 부르지 않는다 (N6)."""
+    b = brief()
+    key = briefing_key("mtf", "079940")
+    rows = [x.to_row() for x in nodes._ordered(
+        cast("Any", st(briefings=[b], signals=[], summaries={key: "요약 한 줄"}))
+    )]
+    assert rows[0]["summary"] == "요약 한 줄"

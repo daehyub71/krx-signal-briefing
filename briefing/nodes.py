@@ -11,14 +11,16 @@ M0 단계: 배선을 먼저 세운다. `TODO(M*)`가 붙은 노드는 통과 스
 
 from __future__ import annotations
 
+import dataclasses
 import time
 from datetime import timedelta
 from typing import Any
 
 from langgraph.types import Send
 
-from briefing import corp, dart, enrich, notify, store
+from briefing import corp, dart, enrich, llm, notify, store
 from briefing import render as rendering
+from briefing import summary as summarizing
 from briefing.models import WINDOW_DAYS, Briefing, RunRecord, SendResult
 from briefing.state import (
     FAILING_STATUSES,
@@ -183,11 +185,34 @@ def fetch_one(item: FetchItem) -> dict[str, Any]:
 
 
 def summarize(state: BriefingState) -> dict[str, Any]:
-    """Claude 1회 일괄 요약. 예외를 밖으로 내지 않는다 — 실패는 `summary_error`에.
+    """Claude 1회 일괄 요약 (F14). **예외를 밖으로 내지 않는다** — 실패는 `summary_error`에.
 
-    TODO(M3): summary.build_input() → llm.summarize() → summary.validate().
+    LLM은 있으면 좋은 층이다 (R12): 키가 없어도, 모델이 거부해도, 응답이 깨져도 메일은 간다.
+    여기서 예외가 새면 `record_run`에 못 가 그날 실행 기록까지 사라진다.
+
+    이미 요약이 있는 브리핑은 빼고 부른다 — 멱등이자 돈 문제다 (N6).
     """
-    return {"summaries": {}}
+    todo = [b for b in state.get("briefings", []) if not b.summary]
+    items = summarizing.build_input(todo)
+    if not items:
+        return {}
+    try:
+        reply = llm.summarize(items)
+    except Exception as exc:  # noqa: BLE001 — 어떤 실패도 메일을 막지 않는다
+        print(f"[summarize] 요약 생략: {exc}")
+        return {"summary_error": str(exc)}
+    kept, dropped = summarizing.validate(
+        reply.payload,
+        [i["ticker"] for i in items],
+        risk_counts={b.ticker: len(b.flags) for b in todo},
+    )
+    for why in dropped:
+        print(f"[summarize] 버림 — {why}")
+    out = {
+        briefing_key(b.strategy, b.ticker): kept[b.ticker] for b in todo if b.ticker in kept
+    }
+    print(f"[summarize] {len(out)}/{len(items)}종목 · 토큰 {reply.usage.total:,}")
+    return {"summaries": out, "llm_tokens": reply.usage.total}
 
 
 def render(state: BriefingState) -> dict[str, Any]:
@@ -208,7 +233,7 @@ def render(state: BriefingState) -> dict[str, Any]:
 
 def persist(state: BriefingState) -> dict[str, Any]:
     """`ksb_briefings` upsert (F9). dry-run이면 건너뛴다. 실패해도 발송은 시도한다."""
-    briefings = state.get("briefings", [])
+    briefings = _ordered(state)
     if state.get("dry_run") or not briefings:
         return {}
     try:
@@ -234,11 +259,21 @@ def send_email(state: BriefingState) -> dict[str, Any]:
 
 
 def _ordered(state: BriefingState) -> list[Briefing]:
-    """상위 메일과 같은 순서로 (전략·티커). fan-out은 완료 순서로 합쳐진다."""
+    """상위 메일과 같은 순서로 (전략·티커) + **요약을 붙인다**.
+
+    fan-out은 완료 순서로 합쳐지므로 여기서 순서를 되돌린다.
+    요약을 여기 한 곳에서 붙여야 본문(`render`)과 저장(`persist`)이 같은 값을 본다 —
+    한쪽만 붙이면 메일에는 요약이 있는데 DB에는 없어 내일 또 LLM을 부른다.
+    """
     order = {(s.strategy, s.ticker): i for i, s in enumerate(state.get("signals", []))}
-    return sorted(
+    summaries = state.get("summaries", {})
+    out: list[Briefing] = []
+    for b in sorted(
         state.get("briefings", []), key=lambda b: order.get((b.strategy, b.ticker), 10**6)
-    )
+    ):
+        text = summaries.get(briefing_key(b.strategy, b.ticker))
+        out.append(dataclasses.replace(b, summary=text) if text else b)
+    return out
 
 
 def _status_of(state: BriefingState) -> str:

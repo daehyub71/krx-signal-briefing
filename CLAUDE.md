@@ -93,7 +93,8 @@ pytest tests/ -v    # 3. 테스트
 - **`Send` fan-out 결과는 reducer로 받는다** — `briefings: Annotated[list, operator.add]`를 빼먹으면 마지막 하나만 남고 예외도 안 난다 (상위에서 실증). `tests/test_graph.py` 합류 테스트가 유일한 방어선. 지우지 말 것.
 - **I/O 노드는 예외를 밖으로 내지 않는다** — `fetch_one`·`summarize`·`send_email`이 raise하면 `record_run`에 못 가 실패 기록이 사라진다. 실패 판정은 `finalize` 한 곳.
 - **LLM은 있으면 좋은 층이다** — 죽어도 메일은 간다. `summary_error`를 적고 `⚠ 요약 생성 실패`를 붙인다.
-- **LLM 출력은 코드가 검증한다** (`summary.validate`) — 금지어·80자·입력에 있는 티커만. 걸린 항목만 버린다.
+- **LLM 출력은 코드가 검증한다** (`summary.validate`) — 금지어·80자·입력에 있는 티커·**위험 유형 건수**. 걸린 항목만 버린다.
+- **모델에게 세라고 시키지 않는다 — 세어서 준다.** 입력에 없는 사실은 지어낸다: `level: "red"`만 주었더니 「위험 유형 2건」(실제 1건)이 나왔다 (2026-08-30 실측). 요약에 넣을 숫자는 `build_input`이 사실로 넣고, `validate`가 다시 대조한다.
 - **`stop_reason == "refusal"`을 먼저 본다** — Opus 5는 거부 응답을 HTTP 200으로 준다. content를 읽기 전에 확인.
 - **DART `013`은 오류가 아니다** — "조회된 데이터가 없습니다" = 공시 0건. `020`은 한도 초과.
 - **DART 제목은 흔들린다** — `유상증자결정` / `유상증자 결정` / `[정정]유상증자결정` / `ㆍ`. `flags.normalize()`를 거치지 않은 매칭은 미탐.
@@ -117,10 +118,10 @@ pytest tests/ -v    # 3. 테스트
 
 ## 진행 상태
 
-**M0~M1c 완료 · M2 대부분 완료** (2026-08-29) — SPEC **v2.1 확정**. 실메일 발송·손검증 완료, 레이아웃 재설계 합의·구현 완료(`docs/DESIGN.md`). 남은 것은 M3(Claude 요약)·M4(워크플로). 진도는 `docs/TASKS.md` 대시보드 참조.
+**M0~M3 완료** (2026-08-30) — SPEC **v2.1**. 레이아웃 재설계 합의·구현(`docs/DESIGN.md`), Claude 요약 실호출·손검증 완료. 남은 것은 **M4(워크플로·배포)·M5(마무리)**. 진도는 `docs/TASKS.md` 대시보드 참조.
 
 | 항목 | 값 |
 |------|-----|
 | 저장소 | `daehyub71/krx-signal-briefing` (**public**) |
-| 테스트 | 328 · ruff · mypy strict 통과 · CI 녹색 |
+| 테스트 | 378 · ruff · mypy strict 통과 · CI 녹색 |
 | DB | `ksb_briefings` · `ksb_runs` 생성, RLS 확인 |

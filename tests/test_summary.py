@@ -53,9 +53,10 @@ def test_build_input_includes_titles_dates_and_level() -> None:
     it = items[0]
     assert it["ticker"] == "079940" and it["name"] == "가비아" and it["level"] == "red"
     assert it["disclosures"] == [
-        {"date": "08/22", "title": CB.report_nm},
+        {"date": "08/22", "title": CB.report_nm, "flag": "red"},  # 걸린 공시는 표시된다
         {"date": "08/07", "title": QUARTERLY.report_nm},
     ]
+    assert it["risk_count"] == 1  # 건수는 사실로 준다 — 세라고 시키지 않는다
     assert "news" not in it  # 뉴스가 없으면 키 자체를 넣지 않는다
 
 
@@ -138,3 +139,88 @@ def test_validate_keeps_the_good_and_drops_the_bad() -> None:
 def test_validate_handles_garbage_payload() -> None:
     assert summary.validate({}, ["079940"]) == ({}, [])
     assert summary.validate({"items": "not a list"}, ["079940"]) == ({}, [])
+
+
+# ── 위험 유형 건수 (2026-08-30 실호출에서 잡힌 것) ───────────────
+#
+# 첫 실호출에서 씨피시스템 요약이 "최근 30일 위험 유형 2건"이라고 했다. 실제 플래그는 1건이다.
+# 입력에 플래그 정보가 아예 없어 모델이 `level: "red"`만 보고 숫자를 지어냈다.
+# 두 곳을 고친다: ① 건수를 입력에 사실로 넣는다 ② 코드가 숫자를 다시 검사한다 (N13).
+
+
+def flagged(**kw: object) -> Briefing:
+    cb = Disclosure(
+        rcept_dt=date(2026, 8, 26),
+        report_nm="주요사항보고서(전환사채권발행결정)",
+        rcept_no="cb1",
+        flr_nm="씨피시스템",
+    )
+    plain = Disclosure(
+        rcept_dt=date(2026, 8, 24),
+        report_nm="반기보고서 (2026.06)",
+        rcept_no="p1",
+        flr_nm="씨피시스템",
+    )
+    base: dict[str, object] = {
+        "signal": SignalRow(
+            d=date(2026, 8, 26), strategy="mtf", ticker="413630", name="씨피시스템", evidence={}
+        ),
+        "corp_code": "1",
+        "level": "red",
+        "disclosures": (cb, plain),
+        "flags": (Flag(rule="cb", level="red", rcept_no="cb1", report_nm=cb.report_nm),),
+    }
+    base.update(kw)
+    return Briefing.from_signal(**base)  # type: ignore[arg-type]
+
+
+def test_build_input_states_the_risk_count_as_a_fact() -> None:
+    """건수를 세라고 시키지 않는다 — 세어서 준다."""
+    (item,) = summary.build_input([flagged()])
+    assert item["risk_count"] == 1
+
+
+def test_build_input_marks_which_disclosures_are_flagged() -> None:
+    """어느 공시가 걸렸는지 표시한다 — 표시가 없으면 등급만 보고 짐작한다."""
+    (item,) = summary.build_input([flagged()])
+    marks = [d.get("flag") for d in item["disclosures"]]
+    assert marks == ["red", None]
+
+
+def test_build_input_omits_the_count_when_there_is_nothing_flagged() -> None:
+    (item,) = summary.build_input([flagged(level="none", flags=())])
+    assert "risk_count" not in item
+
+
+def test_the_prompt_tells_the_model_not_to_count() -> None:
+    assert "risk_count" in summary.SYSTEM_PROMPT
+
+
+def test_validate_drops_a_summary_that_miscounts_the_risks() -> None:
+    """모델이 1건을 2건이라 적으면 버린다 — 지어낸 숫자는 사실보다 나빠 보인다."""
+    payload = {"items": [{"ticker": "413630", "summary": "08/26 전환사채 발행 — 위험 유형 2건"}]}
+    kept, dropped = summary.validate(payload, ["413630"], risk_counts={"413630": 1})
+    assert kept == {}
+    assert any("건수" in d for d in dropped)
+
+
+def test_validate_keeps_a_summary_that_counts_correctly() -> None:
+    said = "08/26 전환사채 발행 — 위험 유형 1건"
+    kept, _ = summary.validate(
+        {"items": [{"ticker": "413630", "summary": said}]}, ["413630"], risk_counts={"413630": 1}
+    )
+    assert kept == {"413630": said}
+
+
+def test_validate_ignores_the_count_check_when_the_summary_states_none() -> None:
+    """건수를 안 적은 요약은 이 검사와 무관하다."""
+    payload = {"items": [{"ticker": "413630", "summary": "08/26 전환사채 발행 결정"}]}
+    kept, _ = summary.validate(payload, ["413630"], risk_counts={"413630": 1})
+    assert kept
+
+
+def test_validate_without_risk_counts_still_works() -> None:
+    """인자를 안 넘겨도 기존 검사는 그대로다 — 호출부를 한 번에 안 고쳐도 된다."""
+    payload = {"items": [{"ticker": "413630", "summary": "08/26 전환사채 발행 — 위험 유형 9건"}]}
+    kept, _ = summary.validate(payload, ["413630"])
+    assert kept
