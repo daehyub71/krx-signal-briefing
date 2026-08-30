@@ -14,7 +14,7 @@ from typing import Any
 import anthropic
 import pytest
 
-from briefing import llm, summary
+from briefing import analysis, llm
 
 ITEMS = [{"ticker": "079940", "name": "가비아", "level": "red", "disclosures": []}]
 
@@ -68,14 +68,14 @@ def test_summarize_returns_the_payload_and_token_counts() -> None:
 
 
 def test_summarize_sends_the_house_prompt_and_schema() -> None:
-    """프롬프트·스키마는 `summary.py`가 소유한다 — llm은 나르기만 한다 (3층 분리)."""
+    """프롬프트·스키마는 `analysis.py`가 소유한다 — llm은 나르기만 한다 (3층 분리)."""
     a = api(reply({"items": []}))
     llm.summarize(ITEMS, api=a)
     kw = a.messages.kwargs
     assert kw["model"] == llm.MODEL
     assert kw["max_tokens"] == llm.MAX_TOKENS
-    assert kw["system"] == summary.SYSTEM_PROMPT
-    assert kw["output_config"]["format"]["schema"] == summary.OUTPUT_SCHEMA
+    assert kw["system"] == analysis.SYSTEM_PROMPT
+    assert kw["output_config"]["format"]["schema"] == analysis.OUTPUT_SCHEMA
     assert kw["output_config"]["format"]["type"] == "json_schema"
 
 

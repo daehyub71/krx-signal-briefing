@@ -16,12 +16,22 @@ I/O 층이다. `fetch_one` 노드가 20줄을 지키도록 호출 순서와 실�
 from __future__ import annotations
 
 import collections
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import date
 from typing import Any
 
 from briefing import dart, dart_mcp, flags, mcpc, news_mcp
-from briefing.models import Anomaly, Briefing, Disclosure, Flow, Insider, NewsItem, SignalRow
+from briefing.models import (
+    Anomaly,
+    Briefing,
+    Disclosure,
+    EventBody,
+    Flag,
+    Flow,
+    Insider,
+    NewsItem,
+    SignalRow,
+)
 
 # 보조 신호에서 "생략"으로 삼키는 예외. 그 밖(프로그래밍 오류)은 그대로 올린다.
 SIDE_SKIP = (mcpc.McpError, ValueError, KeyError, TypeError)
@@ -80,6 +90,34 @@ def news_for(company_name: str) -> tuple[tuple[NewsItem, ...], bool]:
         return (), True
 
 
+def event_bodies(
+    corp_code: str, flag_list: Sequence[Flag], bgn: date, end: date
+) -> tuple[EventBody, ...]:
+    """플래그된 공시의 본문 (F15). 규칙 종류마다 한 번씩 부른다.
+
+    **정형 공시의 본문은 부르지 않는다** — 규칙에 걸린 것만이다. 08/26 기준 5건이었다.
+    실패는 생략으로 삼킨다: 본문은 있으면 좋은 층이고, 없으면 제목만 쓴다 (D15).
+
+    Args:
+        corp_code: DART 고유번호.
+        flag_list: 그 종목의 플래그.
+        bgn: 조회 창 시작.
+        end: 조회 창 끝.
+
+    Returns:
+        본문 목록. 플래그된 접수번호에 해당하는 것만 남긴다 — 같은 창의 다른 건이 섞이지 않게.
+    """
+    wanted = {f.rcept_no for f in flag_list}
+    rules = {f.rule for f in flag_list}
+    out: list[EventBody] = []
+    for rule in sorted(rules):
+        try:
+            out.extend(dart_mcp.fetch_event(corp_code, rule, bgn, end))
+        except SIDE_SKIP as exc:
+            print(f"[enrich] {corp_code} {rule} 본문 생략: {exc}")
+    return tuple(b for b in out if b.rcept_no in wanted)
+
+
 def briefing_for(
     signal: SignalRow,
     corp_code: str,
@@ -102,11 +140,13 @@ def briefing_for(
     if flow_skipped:
         skipped = (*skipped, "flow")
     v = flags.classify(raw, company_name=signal.name, insider=insider)
-    news: tuple[NewsItem, ...] = ()
-    if v.level == "none":
-        news, news_skipped = news_for(signal.name)
-        if news_skipped:
-            skipped = (*skipped, "news")
+    # **전 종목에 붙인다** (F11 v2 · D16, v3.0). v2.0은 등급 `none`인 종목만 불렀는데,
+    # 가장 값진 뉴스가 🔴 종목에서 나왔다 — 씨피시스템 CB의 자금 용도("전액 제2공장 시설투자")는
+    # 공시 제목에도 없고 우리 규칙표에도 없다 (2026-08-30 실측).
+    news, news_skipped = news_for(signal.name)
+    if news_skipped:
+        skipped = (*skipped, "news")
+    bodies = event_bodies(corp_code, v.flags, bgn, end)
     return Briefing.from_signal(
         signal,
         corp_code,
@@ -117,6 +157,7 @@ def briefing_for(
         insider=insider,
         flow=flow,
         news=news,
+        bodies=bodies,
         source=source,
         skipped=skipped,
     )

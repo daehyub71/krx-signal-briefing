@@ -1,7 +1,7 @@
 """Claude 호출 — 하루 1회 일괄 요약 (SPEC F14 · D11). I/O 층.
 
 **LLM은 압축만 한다.** 코드가 사실을 다 모은 뒤 한 번 부른다 — 도구를 주지 않고, 루프도 돌리지
-않는다 (D10). 프롬프트와 스키마는 도메인 층(`summary.py`)이 소유하고 이 모듈은 나르기만 한다.
+않는다 (D10). 프롬프트와 스키마는 도메인 층(`analysis.py`)이 소유하고 이 모듈은 나르기만 한다.
 
 **있으면 좋은 층이다** (R12). 여기서 무슨 일이 나도 예외를 둘로 좁혀 던진다:
 
@@ -27,7 +27,7 @@ from typing import Any
 
 import anthropic
 
-from briefing import config, summary
+from briefing import analysis, config
 
 MODEL = "claude-opus-5"  # D11 — 사용자 결정
 MAX_TOKENS = 4096
@@ -59,7 +59,7 @@ class Usage:
 
 @dataclass(frozen=True, slots=True)
 class Reply:
-    """검증 전 응답. 내용을 믿지 않는다 — `summary.validate()`가 다시 본다 (N13)."""
+    """검증 전 응답. 내용을 믿지 않는다 — `analysis.validate()`가 다시 본다 (N13)."""
 
     payload: dict[str, Any]
     usage: Usage
@@ -108,11 +108,11 @@ def summarize(items: Sequence[dict[str, Any]], *, api: Any = None) -> Reply:
     """종목 목록을 한 번에 요약한다 — **하루 1회, 한 번의 호출**.
 
     Args:
-        items: `summary.build_input()`이 만든 입력 (제목·날짜·등급만).
+        items: `analysis.build_input()`이 만든 입력 (제목·날짜·등급만).
         api: 클라이언트. 테스트가 대역을 넣는다. 없으면 `client()`로 만든다.
 
     Returns:
-        검증 전 `Reply`. 호출자가 `summary.validate()`로 다시 본다.
+        검증 전 `Reply`. 호출자가 `analysis.validate()`로 다시 본다.
 
     Raises:
         LlmUnavailable: 키가 없다 (`api`를 넘기지 않았을 때).
@@ -123,10 +123,10 @@ def summarize(items: Sequence[dict[str, Any]], *, api: Any = None) -> Reply:
         response = api.messages.create(
             model=MODEL,
             max_tokens=MAX_TOKENS,
-            system=summary.SYSTEM_PROMPT,
+            system=analysis.SYSTEM_PROMPT,
             messages=[{"role": "user", "content": json.dumps(list(items), ensure_ascii=False)}],
             output_config={
-                "format": {"type": "json_schema", "schema": summary.OUTPUT_SCHEMA}
+                "format": {"type": "json_schema", "schema": analysis.OUTPUT_SCHEMA}
             },
         )
     except anthropic.APIError as exc:

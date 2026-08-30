@@ -18,9 +18,9 @@ from typing import Any
 
 from langgraph.types import Send
 
+from briefing import analysis as analysing
 from briefing import corp, dart, enrich, llm, notify, store
 from briefing import render as rendering
-from briefing import summary as summarizing
 from briefing.models import WINDOW_DAYS, Briefing, RunRecord, SendResult
 from briefing.state import (
     FAILING_STATUSES,
@@ -193,7 +193,7 @@ def summarize(state: BriefingState) -> dict[str, Any]:
     이미 요약이 있는 브리핑은 빼고 부른다 — 멱등이자 돈 문제다 (N6).
     """
     todo = [b for b in state.get("briefings", []) if not b.summary]
-    items = summarizing.build_input(todo)
+    items = analysing.build_input(todo)
     if not items:
         return {}
     try:
@@ -201,7 +201,7 @@ def summarize(state: BriefingState) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 — 어떤 실패도 메일을 막지 않는다
         print(f"[summarize] 요약 생략: {exc}")
         return {"summary_error": str(exc)}
-    kept, dropped = summarizing.validate(
+    kept, dropped = analysing.validate(
         reply.payload,
         [i["ticker"] for i in items],
         risk_counts={b.ticker: len(b.flags) for b in todo},

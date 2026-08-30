@@ -97,12 +97,14 @@ def test_news_fetched_only_for_none_level(sources: dict[str, Spy]) -> None:
     assert sources["news"].calls == [("가비아",)]
 
 
-def test_news_skipped_when_flagged(sources: dict[str, Spy]) -> None:
-    """🔴/🟡면 공시가 이미 설명한다 — 뉴스를 부르지 않는다."""
+def test_news_is_fetched_for_flagged_stocks_too(sources: dict[str, Spy]) -> None:
+    """v2.0은 등급 `none`인 종목만 불렀다. **가장 값진 뉴스가 🔴 종목에서 나왔다** —
+    씨피시스템 CB의 자금 용도("전액 제2공장 시설투자")는 공시 제목에도 규칙표에도 없다
+    (2026-08-30 실측). D16으로 전 종목에 붙인다."""
     sources["mcp"].result = [CB]
     b = enrich.briefing_for(SIG, "00506294", D, D)
-    assert b.level == "red" and b.news == ()
-    assert sources["news"].calls == []
+    assert b.level == "red"
+    assert sources["news"].calls, "위험 종목에도 뉴스를 부른다"
 
 
 def test_news_failure_is_skipped_not_fatal(sources: dict[str, Spy]) -> None:

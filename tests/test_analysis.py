@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from briefing import summary
+from briefing import analysis
 from briefing.models import Anomaly, Briefing, Disclosure, Flag, NewsItem, SignalRow
 
 D = date(2026, 8, 25)
@@ -43,12 +43,12 @@ def brief(
 
 def test_build_input_skips_stocks_without_material() -> None:
     """공시도 뉴스도 없으면 요약할 것이 없다 — LLM에 보내지 않는다."""
-    items = summary.build_input([brief("none", disclosures=(), flags=())])
+    items = analysis.build_input([brief("none", disclosures=(), flags=())])
     assert items == []
 
 
 def test_build_input_includes_titles_dates_and_level() -> None:
-    items = summary.build_input([brief()])
+    items = analysis.build_input([brief()])
     assert len(items) == 1
     it = items[0]
     assert it["ticker"] == "079940" and it["name"] == "가비아" and it["level"] == "red"
@@ -62,46 +62,46 @@ def test_build_input_includes_titles_dates_and_level() -> None:
 
 def test_build_input_includes_news_titles() -> None:
     """등급 none 종목의 뉴스 제목도 입력에 넣는다 — 본문은 넣지 않는다 (F14)."""
-    items = summary.build_input([brief("none", flags=(), disclosures=(QUARTERLY,), news=NEWS)])
+    items = analysis.build_input([brief("none", flags=(), disclosures=(QUARTERLY,), news=NEWS)])
     assert items[0]["news"] == [{"date": "08/28", "title": NEWS[0].title}]
     assert all("link" not in n for n in items[0]["news"])
 
 
 def test_build_input_carries_anomaly_verdict_only() -> None:
-    items = summary.build_input(
+    items = analysis.build_input(
         [brief(anomaly=Anomaly(score=68, verdict="warning", summary="긴 설명"))]
     )
     assert items[0]["anomaly"] == {"score": 68, "verdict": "warning"}
 
 
 def test_build_input_skips_error_and_unknown() -> None:
-    assert summary.build_input([brief("error"), brief("unknown")]) == []
+    assert analysis.build_input([brief("error"), brief("unknown")]) == []
 
 
 def test_build_input_caps_disclosures_per_stock() -> None:
     many = tuple(
         Disclosure(rcept_dt=D, report_nm=f"공시{i}", rcept_no=str(i), flr_nm="x") for i in range(30)
     )
-    items = summary.build_input([brief(disclosures=many)])
-    assert len(items[0]["disclosures"]) == summary.MAX_DISCLOSURES
+    items = analysis.build_input([brief(disclosures=many)])
+    assert len(items[0]["disclosures"]) == analysis.MAX_DISCLOSURES
 
 
 def test_system_prompt_states_the_rules() -> None:
-    p = summary.SYSTEM_PROMPT
+    p = analysis.SYSTEM_PROMPT
     for must in ("사실", "입력에 없는", "80자", "등급"):
         assert must in p
 
 
 def test_schema_shape() -> None:
-    assert summary.OUTPUT_SCHEMA["type"] == "object"
-    assert "items" in summary.OUTPUT_SCHEMA["properties"]
+    assert analysis.OUTPUT_SCHEMA["type"] == "object"
+    assert "items" in analysis.OUTPUT_SCHEMA["properties"]
 
 
 # ── 응답 검증 (N13) ──────────────────────────────────────────────
 
 
 def test_validate_keeps_good_items() -> None:
-    kept, dropped = summary.validate(
+    kept, dropped = analysis.validate(
         {"items": [{"ticker": "079940", "summary": "08/22 전환사채 발행 결정 — 위험 유형 1건"}]},
         ["079940"],
     )
@@ -119,12 +119,12 @@ def test_validate_keeps_good_items() -> None:
     ],
 )
 def test_validate_drops_bad_items_with_reason(bad: dict[str, str], why: str) -> None:
-    kept, dropped = summary.validate({"items": [bad]}, ["079940"])
+    kept, dropped = analysis.validate({"items": [bad]}, ["079940"])
     assert kept == {} and len(dropped) == 1 and why in dropped[0]
 
 
 def test_validate_keeps_the_good_and_drops_the_bad() -> None:
-    kept, dropped = summary.validate(
+    kept, dropped = analysis.validate(
         {
             "items": [
                 {"ticker": "079940", "summary": "정상 요약"},
@@ -137,8 +137,8 @@ def test_validate_keeps_the_good_and_drops_the_bad() -> None:
 
 
 def test_validate_handles_garbage_payload() -> None:
-    assert summary.validate({}, ["079940"]) == ({}, [])
-    assert summary.validate({"items": "not a list"}, ["079940"]) == ({}, [])
+    assert analysis.validate({}, ["079940"]) == ({}, [])
+    assert analysis.validate({"items": "not a list"}, ["079940"]) == ({}, [])
 
 
 # ── 위험 유형 건수 (2026-08-30 실호출에서 잡힌 것) ───────────────
@@ -176,37 +176,37 @@ def flagged(**kw: object) -> Briefing:
 
 def test_build_input_states_the_risk_count_as_a_fact() -> None:
     """건수를 세라고 시키지 않는다 — 세어서 준다."""
-    (item,) = summary.build_input([flagged()])
+    (item,) = analysis.build_input([flagged()])
     assert item["risk_count"] == 1
 
 
 def test_build_input_marks_which_disclosures_are_flagged() -> None:
     """어느 공시가 걸렸는지 표시한다 — 표시가 없으면 등급만 보고 짐작한다."""
-    (item,) = summary.build_input([flagged()])
+    (item,) = analysis.build_input([flagged()])
     marks = [d.get("flag") for d in item["disclosures"]]
     assert marks == ["red", None]
 
 
 def test_build_input_omits_the_count_when_there_is_nothing_flagged() -> None:
-    (item,) = summary.build_input([flagged(level="none", flags=())])
+    (item,) = analysis.build_input([flagged(level="none", flags=())])
     assert "risk_count" not in item
 
 
 def test_the_prompt_tells_the_model_not_to_count() -> None:
-    assert "risk_count" in summary.SYSTEM_PROMPT
+    assert "risk_count" in analysis.SYSTEM_PROMPT
 
 
 def test_validate_drops_a_summary_that_miscounts_the_risks() -> None:
     """모델이 1건을 2건이라 적으면 버린다 — 지어낸 숫자는 사실보다 나빠 보인다."""
     payload = {"items": [{"ticker": "413630", "summary": "08/26 전환사채 발행 — 위험 유형 2건"}]}
-    kept, dropped = summary.validate(payload, ["413630"], risk_counts={"413630": 1})
+    kept, dropped = analysis.validate(payload, ["413630"], risk_counts={"413630": 1})
     assert kept == {}
     assert any("건수" in d for d in dropped)
 
 
 def test_validate_keeps_a_summary_that_counts_correctly() -> None:
     said = "08/26 전환사채 발행 — 위험 유형 1건"
-    kept, _ = summary.validate(
+    kept, _ = analysis.validate(
         {"items": [{"ticker": "413630", "summary": said}]}, ["413630"], risk_counts={"413630": 1}
     )
     assert kept == {"413630": said}
@@ -215,12 +215,12 @@ def test_validate_keeps_a_summary_that_counts_correctly() -> None:
 def test_validate_ignores_the_count_check_when_the_summary_states_none() -> None:
     """건수를 안 적은 요약은 이 검사와 무관하다."""
     payload = {"items": [{"ticker": "413630", "summary": "08/26 전환사채 발행 결정"}]}
-    kept, _ = summary.validate(payload, ["413630"], risk_counts={"413630": 1})
+    kept, _ = analysis.validate(payload, ["413630"], risk_counts={"413630": 1})
     assert kept
 
 
 def test_validate_without_risk_counts_still_works() -> None:
     """인자를 안 넘겨도 기존 검사는 그대로다 — 호출부를 한 번에 안 고쳐도 된다."""
     payload = {"items": [{"ticker": "413630", "summary": "08/26 전환사채 발행 — 위험 유형 9건"}]}
-    kept, _ = summary.validate(payload, ["413630"])
+    kept, _ = analysis.validate(payload, ["413630"])
     assert kept
