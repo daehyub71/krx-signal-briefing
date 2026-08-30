@@ -160,7 +160,9 @@ def test_rate_limit_is_retried_once(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(time, "sleep", lambda s: slept.append(s))
     srv = FlakyServer(SAMPLE)
     items = fetch_news("가비아", server=srv)
-    assert len(items) == 5 and srv.calls == 2 and news_mcp.RETRY_WAIT in slept
+    assert srv.calls == 2 and news_mcp.RETRY_WAIT in slept
+    # 재시도 경로에도 제목 필터가 걸린다 — 빠뜨리면 429가 난 종목만 안 걸러진다.
+    assert items and all("가비아" in n.title for n in items)
 
 
 def test_other_call_errors_are_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -234,14 +236,18 @@ def test_an_item_without_a_description_is_still_kept() -> None:
 
 
 def test_keeps_only_articles_whose_title_names_the_company() -> None:
-    """`LG`로 검색하면 야구단·계열사 기사가 섞인다 (실측)."""
+    """`LG`로 검색하면 야구단·계열사 기사가 섞인다 (실측).
+
+    `부산 LG-롯데전`은 앞이 한글(`산`)이라 걸러진다 — 야구단 기사다.
+    `LG전자`는 앞이 비어 남는다. 다른 종목이지만 지주사 기사와 함께 읽을 값이 있다.
+    """
     items = [
         {"title": "<b>LG</b>전자, 3분기 영업이익 발표", "link": "https://n/1"},
         {"title": "부산 LG-롯데전, 우천 노게임", "link": "https://n/2"},
         {"title": "코스피 상승 마감", "link": "https://n/3"},
     ]
     kept = news_mcp.about(news_mcp.parse_news({"items": items}), "LG")
-    assert [n.link for n in kept] == ["https://n/1", "https://n/2"]  # 제목에 LG가 있는 둘
+    assert [n.link for n in kept] == ["https://n/1"]
 
 
 def test_the_filter_ignores_spaces_in_the_company_name() -> None:
@@ -271,3 +277,27 @@ def test_fetch_news_applies_the_filter(monkeypatch: pytest.MonkeyPatch) -> None:
     assert [n.link for n in out] == [REAL_ITEM["link"]]
     assert srv.args["query"] == "씨피시스템"
     assert srv.args["sort"] == "sim"
+
+
+def test_the_filter_does_not_match_a_name_inside_a_longer_company_name() -> None:
+    """`아이텍`이 `위세아이텍` 안에서 잡혔다 — 2026-08-30 실호출에서 모델이 먼저 지적했다.
+
+    다섯 건 전부 다른 회사 기사였고, 서술은 "아이텍의 공시와 연결되는 재료가 아니다"로 끝났다.
+    한글 이름은 이어 붙으므로 **앞뒤가 한글이면 다른 회사**로 본다.
+    """
+    items = [
+        {"title": "위세아이텍, 상장 후 최대 배당 추진", "link": "https://n/1"},
+        {"title": "아이텍, 전환가액 조정 공시", "link": "https://n/2"},
+        {"title": "[특징주] 아이텍 급등", "link": "https://n/3"},
+    ]
+    kept = news_mcp.about(news_mcp.parse_news({"items": items}), "아이텍")
+    assert [n.link for n in kept] == ["https://n/2", "https://n/3"]
+
+
+def test_the_filter_still_matches_when_punctuation_touches_the_name() -> None:
+    items = [
+        {"title": "'제테마' 中 보톡스 허가 신청", "link": "https://n/1"},
+        {"title": "제테마(216080), 계약 체결", "link": "https://n/2"},
+    ]
+    kept = news_mcp.about(news_mcp.parse_news({"items": items}), "제테마")
+    assert len(kept) == 2

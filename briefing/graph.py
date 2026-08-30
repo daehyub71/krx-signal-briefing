@@ -16,7 +16,7 @@ from briefing import nodes
 from briefing.state import RECURSION_LIMIT, BriefingState
 
 # 네트워크를 타면서 예외를 내는 노드에만 재시도를 건다.
-# fetch_one·summarize·send_email은 예외를 밖으로 내지 않으므로 노드 재시도가 걸리지 않는다 —
+# fetch_one·analyze·send_email은 예외를 밖으로 내지 않으므로 노드 재시도가 걸리지 않는다 —
 # 전송 재시도는 각 클라이언트 안에서 한다 (PLAN §1-1).
 NETWORK_RETRY = RetryPolicy(max_attempts=3, initial_interval=1.0, backoff_factor=2.0)
 
@@ -47,7 +47,7 @@ def build_graph(overrides: Mapping[str, Callable[..., Any]] | None = None) -> An
     g.add_node("load_corps", pick("load_corps", nodes.load_corps), retry_policy=NETWORK_RETRY)
     g.add_node("load_market", pick("load_market", nodes.load_market))
     g.add_node("fetch_one", pick("fetch_one", nodes.fetch_one))
-    g.add_node("summarize", pick("summarize", nodes.summarize))
+    g.add_node("analyze", pick("analyze", nodes.analyze))
     g.add_node("render", pick("render", nodes.render))
     g.add_node("persist", pick("persist", nodes.persist))
     g.add_node("send_email", pick("send_email", nodes.send_email))
@@ -74,14 +74,14 @@ def build_graph(overrides: Mapping[str, Callable[..., Any]] | None = None) -> An
     # 시세 참고는 배치 1회 (F12) — 종목당 부르면 270회
     g.add_edge("load_corps", "load_market")
 
-    # 종목별 fan-out → summarize에서 합류. briefings 리듀서가 결과를 합친다.
-    # 신호 0건이면 Send 없이 summarize로 직행한다 — 빈 Send 목록은 그래프를 조용히 끝낸다.
+    # 종목별 fan-out → analyze에서 합류. briefings 리듀서가 결과를 합친다.
+    # 신호 0건이면 Send 없이 analyze로 직행한다 — 빈 Send 목록은 그래프를 조용히 끝낸다.
     g.add_conditional_edges(
-        "load_market", pick("fan_out", nodes.fan_out), ["fetch_one", "summarize"]
+        "load_market", pick("fan_out", nodes.fan_out), ["fetch_one", "analyze"]
     )
-    g.add_edge("fetch_one", "summarize")
+    g.add_edge("fetch_one", "analyze")
 
-    g.add_edge("summarize", "render")
+    g.add_edge("analyze", "render")
     g.add_edge("render", "persist")
     g.add_edge("persist", "send_email")
     g.add_edge("send_email", "record_run")

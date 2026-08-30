@@ -20,7 +20,7 @@ graph TD;
 	load_corps(load_corps)
 	load_market(load_market)
 	fetch_one(fetch_one)
-	summarize(summarize)
+	analyze(analyze)
 	render(render)
 	persist(persist)
 	send_email(send_email)
@@ -28,20 +28,20 @@ graph TD;
 	finalize(finalize)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> gate;
-	fetch_one --> summarize;
+	analyze --> render;
+	fetch_one --> analyze;
 	gate -. &nbsp;ready&nbsp; .-> load_signals;
 	gate -. &nbsp;timeout&nbsp; .-> record_run;
 	gate -. &nbsp;stale&nbsp; .-> render;
 	gate -. &nbsp;missing&nbsp; .-> wait;
 	load_corps --> load_market;
+	load_market -.-> analyze;
 	load_market -.-> fetch_one;
-	load_market -.-> summarize;
 	load_signals --> load_corps;
 	persist --> send_email;
 	record_run --> finalize;
 	render --> persist;
 	send_email --> record_run;
-	summarize --> render;
 	wait --> gate;
 	finalize --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2

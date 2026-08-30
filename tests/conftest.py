@@ -105,7 +105,7 @@ def wiring(log: list[str] | None = None, **custom: Node) -> dict[str, Node]:
         "load_corps": trace("load_corps", log, {"corp_codes": {}}),
         "load_market": trace("load_market", log, {"flows": {}, "flow_skipped": ""}),
         "fetch_one": stub_fetch_one(log),
-        "summarize": trace("summarize", log, {"summaries": {}}),
+        "analyze": trace("analyze", log, {"summaries": {}, "verdicts": {}}),
         "render": trace("render", log, {"subject": "s", "text": "t", "html": "h"}),
         "persist": trace("persist", log),
         "send_email": trace("send_email", log, {"send": SendResult(ok=True, sent_n=1)}),

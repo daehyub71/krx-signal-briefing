@@ -30,8 +30,10 @@ import anthropic
 from briefing import analysis, config
 
 MODEL = "claude-opus-5"  # D11 — 사용자 결정
-MAX_TOKENS = 4096
-TIMEOUT = 60.0  # 초. 넘기면 배치가 매달린다 — 상위 워크플로에 시간 제한이 있다
+# 15종목 × 최대 2,000자면 출력만 2만 토큰이 넘는다 (F19). 4096으로는 잘린다.
+# **이만큼을 논스트리밍으로 받으면 HTTP 타임아웃에 걸린다** — SDK가 스트리밍을 요구한다.
+MAX_TOKENS = 32000
+TIMEOUT = 300.0  # 초. 스트리밍이라 오래 걸려도 연결이 끊기지 않는다
 RETRIES = 2
 
 KEY = "ANTHROPIC_API_KEY"
@@ -108,7 +110,7 @@ def summarize(items: Sequence[dict[str, Any]], *, api: Any = None) -> Reply:
     """종목 목록을 한 번에 요약한다 — **하루 1회, 한 번의 호출**.
 
     Args:
-        items: `analysis.build_input()`이 만든 입력 (제목·날짜·등급만).
+        items: `analysis.build_input()`이 만든 입력 — 공시 본문·뉴스·수급·코드 판정이 들어 있다.
         api: 클라이언트. 테스트가 대역을 넣는다. 없으면 `client()`로 만든다.
 
     Returns:
@@ -119,16 +121,18 @@ def summarize(items: Sequence[dict[str, Any]], *, api: Any = None) -> Reply:
         LlmError: 호출·응답 실패. **그 밖의 예외는 나가지 않는다.**
     """
     api = api or client()
+    args: dict[str, Any] = {
+        "model": MODEL,
+        "max_tokens": MAX_TOKENS,
+        "system": analysis.SYSTEM_PROMPT,
+        "messages": [{"role": "user", "content": json.dumps(list(items), ensure_ascii=False)}],
+        "output_config": {"format": {"type": "json_schema", "schema": analysis.OUTPUT_SCHEMA}},
+    }
     try:
-        response = api.messages.create(
-            model=MODEL,
-            max_tokens=MAX_TOKENS,
-            system=analysis.SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": json.dumps(list(items), ensure_ascii=False)}],
-            output_config={
-                "format": {"type": "json_schema", "schema": analysis.OUTPUT_SCHEMA}
-            },
-        )
+        # **스트리밍으로 받는다.** 출력이 2만 토큰을 넘을 수 있어 논스트리밍이면
+        # HTTP 타임아웃에 걸린다 (2026-08-30 실측: `APITimeoutError`).
+        with api.messages.stream(**args) as stream:
+            response = stream.get_final_message()
     except anthropic.APIError as exc:
         # 예외를 그대로 감싸면 URL·헤더가 딸려 온다. 종류와 상태 코드만 남긴다 (N7).
         code = getattr(exc, "status_code", None)

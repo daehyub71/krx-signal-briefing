@@ -46,7 +46,7 @@ def test_gate_ready_goes_through_full_path() -> None:
     log: list[str] = []
     out = run(wiring(log))
     assert log == [
-        "gate", "load_signals", "load_corps", "load_market", "summarize", "render",
+        "gate", "load_signals", "load_corps", "load_market", "analyze", "render",
         "persist", "send_email", "record_run",
     ]
     assert out["status"] == STATUS_NO_SIGNALS  # 신호 0건 — "브리핑 없음"도 발송한다 (D8)
@@ -107,7 +107,7 @@ def test_fan_out_collects_every_briefing() -> None:
     )
     assert sorted(b.ticker for b in out["briefings"]) == ["000001", "000002", "000003"]
     assert out["dart_calls"] == 3
-    assert log.count("load_corps") == 1 and log.count("summarize") == 1
+    assert log.count("load_corps") == 1 and log.count("analyze") == 1
     fetched = [x for x in log if x.startswith("fetch_one:")]
     assert len(fetched) == 3
     # corp_code는 항목별로 실려 간다 — 없는 종목은 None
@@ -120,14 +120,14 @@ def test_fan_out_with_zero_signals_still_reaches_summarize() -> None:
     log: list[str] = []
     out = run(wiring(log))
     assert not [x for x in log if x.startswith("fetch_one:")]
-    assert "summarize" in log and "record_run" in log
+    assert "analyze" in log and "record_run" in log
     assert out["briefings"] == []
 
 
 # ── ④ 실패해도 record_run 도달 ─────────────────────────────────
 
 
-def test_summarize_failure_does_not_block_mail() -> None:
+def test_analyze_failure_does_not_block_mail() -> None:
     """LLM은 있으면 좋은 층이다 (R11) — 실패해도 status는 ok."""
     log: list[str] = []
     signals = [a_signal("000001")]
@@ -135,7 +135,7 @@ def test_summarize_failure_does_not_block_mail() -> None:
         wiring(
             log,
             load_signals=trace("load_signals", log, {"signals": signals, "existing": {}}),
-            summarize=trace("summarize", log, {"summary_error": "APIConnectionError"}),
+            analyze=trace("analyze", log, {"summary_error": "APIConnectionError"}),
         )
     )
     assert log[-3:] == ["persist", "send_email", "record_run"]

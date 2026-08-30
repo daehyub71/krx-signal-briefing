@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import operator
 from datetime import date
-from typing import Annotated, TypedDict
+from typing import Annotated, Any, TypedDict
 
 from briefing.models import Briefing, Flow, SendResult, SignalRow
 
@@ -86,7 +86,8 @@ class BriefingState(TypedDict, total=False):
     dart_calls: Annotated[int, operator.add]
 
     # 요약 (F14)
-    summaries: dict[str, str]       # briefing_key → summary
+    summaries: dict[str, str]       # briefing_key → 근거 서술 (F19)
+    verdicts: dict[str, Any]        # ticker → Verdict (F18). 코드가 낸다 — LLM이 못 바꾼다
     summary_error: str
     llm_tokens: int
 
@@ -124,6 +125,7 @@ def initial_state(run_date: date, *, dry_run: bool = False, force: bool = False)
         briefings=[],
         dart_calls=0,
         summaries={},
+        verdicts={},
         summary_error="",
         llm_tokens=0,
         subject="",

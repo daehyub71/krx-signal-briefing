@@ -1,18 +1,20 @@
 """naver-search-mcp `search_news` → NewsItem (F11·D13 ④).
 
-**공시로 설명되지 않는 종목만** 부른다 — 등급이 `none`일 때. 수주·실적은 공시로 나오므로
-그때 뉴스를 찾는 것은 노이즈만 늘린다 (아이디어 §2-2).
+**전 종목에 붙인다** (F11 v2 · D16, v3.0). v2.0은 등급 `none`인 종목만 불렀는데,
+가장 값진 뉴스가 🔴 종목에서 나왔다 — 씨피시스템 CB의 자금 용도("전액 제2공장 시설투자")는
+공시 제목에도 없고 규칙표에도 없다 (2026-08-30 실측).
 
 응답 정제가 이 모듈의 일이다 (2026-08-29 실호출 확인):
 - `title`·`description`에 검색어 강조 **`<b>` 태그**와 HTML 엔티티(`&amp;` `&quot;`)가 섞여 온다
 - `pubDate`는 RFC 822 (`Fri, 28 Aug 2026 17:30:00 +0900`)
 - `link`(네이버 뉴스)와 `originallink`(언론사 원문)가 따로 온다 — 둘 다 남긴다
 
-**검색어에 `주가`를 붙인다** (2026-08-29 A/B 실측). 종목명만 넣으면 일반명사 이름에서 무너진다 —
-`핑거` 3건이 전부 핑거푸드·음악 기사였고, `주가`를 붙이자 전환사채 취득 기사가 잡혔다.
-`가비아`도 2/3 → 3/3이 됐다. 그래도 완벽하지 않다(2글자 이름 `DL`은 여전히 시황 기사) —
-**동음이의 노이즈는 v1에서 걸러내지 않는다** (R17). 사실만 나열하고 판단은 사용자 몫이며,
-링크가 옆에 있어 5초면 확인된다.
+**검색어는 종목명만, 정렬은 관련도순** (F11 v2, 2026-08-30 A/B 실측).
+v2.0의 `{종목명} 주가` + 최신순은 적합도 **64%**였다 — 매일 자동 생성되는 시세 기사가
+상위를 채웠다. 종목명만 + 관련도순이 **95%**다.
+
+동음이의는 검색어가 아니라 **결과**를 좁혀 막는다 (`about()`) — 검색어를 좁히면
+정작 필요한 기사도 빠진다. 실수집에서 적합도 100%(52/52)가 나왔다.
 """
 
 from __future__ import annotations
@@ -45,6 +47,8 @@ _last_call = 0.0
 
 _TAG = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\s+")
+# 한글 음절·자모. 이름 앞뒤가 한글이면 더 긴 회사 이름의 일부다.
+_HANGUL = re.compile(r"[가-힣ㄱ-ㅎㅏ-ㅣ]")
 
 
 class _Server(Protocol):
@@ -112,7 +116,26 @@ def about(items: Sequence[NewsItem], company_name: str) -> list[NewsItem]:
         제목에 종목명이 든 기사만. 0건일 수 있다 — 0건과 "층이 죽었다"는 다르다.
     """
     needle = _WS.sub("", company_name)
-    return [n for n in items if needle and needle in _WS.sub("", n.title)]
+    if not needle:
+        return []
+    return [n for n in items if _names(needle, _WS.sub("", n.title))]
+
+
+def _names(needle: str, title: str) -> bool:
+    """제목이 **그 종목**을 가리키는가.
+
+    단순 부분 문자열이면 `아이텍`이 `위세아이텍` 안에서 잡힌다 — 2026-08-30 실호출에서
+    다섯 건 전부 다른 회사 기사였고, 모델이 "아이텍의 공시와 연결되는 재료가 아니다"라고
+    먼저 알아봤다. **앞 글자만 본다** — 한국 회사 이름은 앞에 수식어가 붙어 길어지지만
+    (`위세아이텍`), 뒷글자는 조사나 서술어인 경우가 많아(`아이텍급등`·`제테마는`)
+    막으면 멀쩡한 기사를 버린다.
+    """
+    start = 0
+    while (i := title.find(needle, start)) != -1:
+        if i == 0 or not _HANGUL.match(title[i - 1]):
+            return True
+        start = i + 1
+    return False
 
 
 def _wait_turn() -> None:
@@ -141,4 +164,5 @@ def fetch_news(company_name: str, *, server: _Server | None = None) -> list[News
         print(f"[news] {company_name} 429 — {RETRY_WAIT}초 후 재시도")
         time.sleep(RETRY_WAIT)
         _wait_turn()
-        return parse_news(srv.call_json("search_news", args, timeout=TIMEOUT))
+        # 재시도 경로에도 같은 필터를 건다 — 빠뜨리면 429가 난 종목만 걸러지지 않는다.
+        return about(parse_news(srv.call_json("search_news", args, timeout=TIMEOUT)), company_name)

@@ -19,7 +19,7 @@ from typing import Any
 from langgraph.types import Send
 
 from briefing import analysis as analysing
-from briefing import corp, dart, enrich, llm, notify, store
+from briefing import corp, dart, enrich, llm, notify, store, verdict
 from briefing import render as rendering
 from briefing.models import WINDOW_DAYS, Briefing, RunRecord, SendResult
 from briefing.state import (
@@ -39,6 +39,7 @@ from briefing.state import (
     FetchItem,
     briefing_key,
 )
+from briefing.verdict import Verdict
 
 
 class BriefingRunError(RuntimeError):
@@ -134,7 +135,7 @@ def fan_out(state: BriefingState) -> list[Send] | str:
     """
     signals = state.get("signals", [])
     if not signals:
-        return "summarize"
+        return "analyze"
     corps, existing = state.get("corp_codes", {}), state.get("existing", {})
     flows, flow_skipped = state.get("flows", {}), bool(state.get("flow_skipped"))
     return [
@@ -181,38 +182,56 @@ def fetch_one(item: FetchItem) -> dict[str, Any]:
     return {"briefings": [b], "dart_calls": 1}
 
 
-# ── 요약 · 본문 (F14 · F7·F8) ───────────────────────────────────
+# ── 판정 · 근거 서술 · 본문 (F18 · F19 · F7·F8) ─────────────────
 
 
-def summarize(state: BriefingState) -> dict[str, Any]:
-    """Claude 1회 일괄 요약 (F14). **예외를 밖으로 내지 않는다** — 실패는 `summary_error`에.
+def analyze(state: BriefingState) -> dict[str, Any]:
+    """판정(코드) → Claude 근거 서술 1회 일괄 (F18·F19). **예외를 밖으로 내지 않는다.**
 
-    LLM은 있으면 좋은 층이다 (R12): 키가 없어도, 모델이 거부해도, 응답이 깨져도 메일은 간다.
-    여기서 예외가 새면 `record_run`에 못 가 그날 실행 기록까지 사라진다.
+    두 층이 겹쳐 있다:
 
-    이미 요약이 있는 브리핑은 빼고 부른다 — 멱등이자 돈 문제다 (N6).
+    1. **`verdict.judge()`가 판정과 점수를 낸다** — 순수 함수다. LLM이 죽어도 이건 나간다.
+    2. LLM은 그 판정을 **설명**한다. 실패하면 서술만 빠지고 판정·점수·공시·뉴스·수급은 그대로다.
+
+    LLM은 있으면 좋은 층이다 (R12). 여기서 예외가 새면 `record_run`에 못 가
+    그날 실행 기록까지 사라진다.
     """
-    todo = [b for b in state.get("briefings", []) if not b.summary]
-    items = analysing.build_input(todo)
+    briefings = state.get("briefings", [])
+    verdicts = {b.ticker: verdict.judge(b) for b in briefings}
+    todo = [b for b in briefings if not b.summary]
+    items = analysing.build_input(todo, verdicts)
     if not items:
-        return {}
+        return {"verdicts": verdicts}
     try:
         reply = llm.summarize(items)
-    except Exception as exc:  # noqa: BLE001 — 어떤 실패도 메일을 막지 않는다
-        print(f"[summarize] 요약 생략: {exc}")
-        return {"summary_error": str(exc)}
-    kept, dropped = analysing.validate(
+    except Exception as exc:  # noqa: BLE001 — 어떤 실패도 판정·메일을 막지 않는다
+        print(f"[analyze] 근거 서술 생략: {exc}")
+        return {"verdicts": verdicts, "summary_error": str(exc)}
+    kept, dropped = _validated(reply, items, todo, verdicts)
+    for why in dropped:
+        print(f"[analyze] 버림 — {why}")
+    out = {briefing_key(b.strategy, b.ticker): kept[b.ticker] for b in todo if b.ticker in kept}
+    print(f"[analyze] {len(out)}/{len(items)}종목 · 토큰 {reply.usage.total:,}")
+    return {"verdicts": verdicts, "summaries": out, "llm_tokens": reply.usage.total}
+
+
+def _validated(
+    reply: llm.Reply,
+    items: list[dict[str, Any]],
+    todo: list[Briefing],
+    verdicts: dict[str, Verdict],
+) -> tuple[dict[str, str], list[str]]:
+    """응답 검증 인자를 모은다 — 노드가 20줄을 넘지 않게 (N3)."""
+    return analysing.validate(
         reply.payload,
         [i["ticker"] for i in items],
+        stands={t: v.stand for t, v in verdicts.items()},
         risk_counts={b.ticker: len(b.flags) for b in todo},
+        overhangs={
+            b.ticker: {x.overhang_pct for x in b.bodies if x.overhang_pct is not None}
+            for b in todo
+        },
     )
-    for why in dropped:
-        print(f"[summarize] 버림 — {why}")
-    out = {
-        briefing_key(b.strategy, b.ticker): kept[b.ticker] for b in todo if b.ticker in kept
-    }
-    print(f"[summarize] {len(out)}/{len(items)}종목 · 토큰 {reply.usage.total:,}")
-    return {"summaries": out, "llm_tokens": reply.usage.total}
 
 
 def render(state: BriefingState) -> dict[str, Any]:

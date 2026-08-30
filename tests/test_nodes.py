@@ -325,37 +325,38 @@ def fake_reply(payload: dict[str, Any]) -> llm.Reply:
     return llm.Reply(payload=payload, usage=llm.Usage(input_tokens=5100, output_tokens=420))
 
 
-def test_summarize_keeps_valid_lines_and_records_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_keeps_valid_lines_and_records_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     b = brief()
-    said = {"items": [{"ticker": "079940", "summary": "08/22 전환사채 발행 결정"}]}
+    said = {"items": [{"ticker": "079940", "reason": "08/22 전환사채 발행 결정"}]}
     monkeypatch.setattr(llm, "summarize", lambda items: fake_reply(said))
-    out = nodes.summarize(cast("Any", st(briefings=[b])))
+    out = nodes.analyze(cast("Any", st(briefings=[b])))
     assert out["summaries"] == {briefing_key("mtf", "079940"): "08/22 전환사채 발행 결정"}
     assert out["llm_tokens"] == 5520
     assert not out.get("summary_error")
 
 
-def test_summarize_drops_only_the_line_that_breaks_a_rule(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_drops_only_the_line_that_breaks_a_rule(monkeypatch: pytest.MonkeyPatch) -> None:
     """금지어가 든 한 줄만 버린다 — 나머지 종목의 요약은 남는다 (N13)."""
     good, bad = brief(), brief("227950", "엔투텍")
     monkeypatch.setattr(
         llm, "summarize",
         lambda items: fake_reply({"items": [
-            {"ticker": "079940", "summary": "08/22 전환사채 발행 결정"},
-            {"ticker": "227950", "summary": "지금이 매수 시점이다"},
+            {"ticker": "079940", "reason": "08/22 전환사채 발행 결정"},
+            {"ticker": "227950", "reason": "지금이 매수 시점이다"},
         ]}),
     )
-    out = nodes.summarize(cast("Any", st(briefings=[good, bad])))
+    out = nodes.analyze(cast("Any", st(briefings=[good, bad])))
     assert list(out["summaries"]) == [briefing_key("mtf", "079940")]
+    assert set(out["verdicts"]) == {"079940", "227950"}  # 판정은 둘 다 나간다
 
 
-def test_summarize_swallows_a_missing_key_and_names_it(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_swallows_a_missing_key_and_names_it(monkeypatch: pytest.MonkeyPatch) -> None:
     """키가 없어도 메일은 간다 (R12). 예외가 새면 그날 메일이 통째로 사라진다."""
     def boom(items: object) -> object:
         raise llm.LlmUnavailable("ANTHROPIC_API_KEY 없음")
 
     monkeypatch.setattr(llm, "summarize", boom)
-    out = nodes.summarize(cast("Any", st(briefings=[brief()])))
+    out = nodes.analyze(cast("Any", st(briefings=[brief()])))
     assert "ANTHROPIC_API_KEY" in out["summary_error"]
     assert out.get("summaries", {}) == {}
 
@@ -363,32 +364,36 @@ def test_summarize_swallows_a_missing_key_and_names_it(monkeypatch: pytest.Monke
 @pytest.mark.parametrize(
     "exc", [llm.LlmError("모델이 응답을 거부했다"), RuntimeError("생각지 못한 것")]
 )
-def test_summarize_never_raises(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
+def test_analyze_never_raises(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
     """`LlmError`든 아니든 예외는 밖으로 나가지 않는다 — `record_run`에 못 가면 기록이 사라진다."""
     def boom(items: object) -> object:
         raise exc
 
     monkeypatch.setattr(llm, "summarize", boom)
-    out = nodes.summarize(cast("Any", st(briefings=[brief()])))
+    out = nodes.analyze(cast("Any", st(briefings=[brief()])))
     assert out["summary_error"]
 
 
-def test_summarize_does_not_call_the_model_when_there_is_nothing_to_summarize(
+def test_analyze_does_not_call_the_model_when_there_is_nothing_to_analyze(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """공시를 못 본 종목뿐이면 부르지 않는다 — 돈이 든다."""
     called = []
     monkeypatch.setattr(llm, "summarize", lambda items: called.append(items))
-    out = nodes.summarize(cast("Any", st(briefings=[brief(level="unknown", disclosures=())])))
-    assert called == [] and out == {}
+    out = nodes.analyze(cast("Any", st(briefings=[brief(level="unknown", disclosures=())])))
+    assert called == []
+    assert out.get("summaries", {}) == {}
+    assert "verdicts" in out  # 판정은 LLM과 무관하게 항상 나간다 (F18)
 
 
-def test_summarize_skips_a_briefing_that_already_has_one(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_analyze_skips_a_briefing_that_already_has_one(monkeypatch: pytest.MonkeyPatch) -> None:
     """멱등 (N6) — 어제 만든 요약을 다시 사겠다고 LLM을 부르지 않는다."""
     called = []
     monkeypatch.setattr(llm, "summarize", lambda items: called.append(items))
-    out = nodes.summarize(cast("Any", st(briefings=[brief(summary="이미 있다")])))
-    assert called == [] and out == {}
+    out = nodes.analyze(cast("Any", st(briefings=[brief(summary="이미 있다")])))
+    assert called == []
+    assert out.get("summaries", {}) == {}
+    assert "verdicts" in out
 
 
 # ── 요약이 본문·저장까지 흘러가는가 ──────────────────────────────

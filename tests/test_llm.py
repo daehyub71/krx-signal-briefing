@@ -1,7 +1,7 @@
 """llm — Claude 호출 (F14 · D11). I/O 층이라 SDK는 전부 mock이다.
 
 **이 층은 있으면 좋은 층이다** (R12). 여기서 무슨 일이 나도 예외가 밖으로 새면 안 된다 —
-`summarize` 노드가 잡을 수 있도록 `LlmUnavailable`·`LlmError` 둘로 좁혀 던진다.
+`analyze` 노드가 잡을 수 있도록 `LlmUnavailable`·`LlmError` 둘로 좁혀 던진다.
 새는 예외 하나가 그날 메일 전체를 없앤다.
 """
 
@@ -19,18 +19,38 @@ from briefing import analysis, llm
 ITEMS = [{"ticker": "079940", "name": "가비아", "level": "red", "disclosures": []}]
 
 
+class FakeStream:
+    """`messages.stream()`이 돌려주는 컨텍스트 매니저 대역."""
+
+    def __init__(self, reply: Any, exc: Exception | None) -> None:
+        self.reply, self.exc = reply, exc
+
+    def __enter__(self) -> FakeStream:
+        if self.exc is not None:
+            raise self.exc
+        return self
+
+    def __exit__(self, *a: Any) -> None:
+        return None
+
+    def get_final_message(self) -> Any:
+        return self.reply
+
+
 class FakeMessages:
-    """`client.messages` 대역. 마지막 호출 인자를 남긴다."""
+    """`client.messages` 대역. 마지막 호출 인자를 남긴다.
+
+    **스트리밍으로 부른다** — 출력이 2만 토큰을 넘을 수 있어 논스트리밍이면
+    HTTP 타임아웃에 걸린다 (2026-08-30 실측).
+    """
 
     def __init__(self, reply: Any = None, exc: Exception | None = None) -> None:
         self.reply, self.exc = reply, exc
         self.kwargs: dict[str, Any] = {}
 
-    def create(self, **kwargs: Any) -> Any:
+    def stream(self, **kwargs: Any) -> FakeStream:
         self.kwargs = kwargs
-        if self.exc is not None:
-            raise self.exc
-        return self.reply
+        return FakeStream(self.reply, self.exc)
 
 
 def api(reply: Any = None, exc: Exception | None = None) -> Any:

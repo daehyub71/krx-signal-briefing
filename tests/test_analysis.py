@@ -1,226 +1,300 @@
-"""summary — LLM 입력 구성·응답 검증 (F14·N13). 순수 함수, LLM 없이 검사한다."""
+"""analysis — LLM 분석의 입력 구성과 응답 검증 (SPEC F19·N13 v2, v3.0). 순수 함수.
+
+v2.0의 `summary.py`는 공시 제목을 80자로 압축했다. v3.0은 세 갈래 증거로 신호를
+검증한 **근거 서술**을 만든다 — 입력에 공시 본문·수급·코드가 낸 판정이 들어간다.
+
+**LLM은 판정을 설명할 뿐 바꾸지 않는다.** 검증이 그 경계를 지킨다.
+"""
 
 from __future__ import annotations
 
 from datetime import date
+from typing import Any
 
 import pytest
 
-from briefing import analysis
-from briefing.models import Anomaly, Briefing, Disclosure, Flag, NewsItem, SignalRow
-
-D = date(2026, 8, 25)
-CB = Disclosure(
-    rcept_dt=date(2026, 8, 22),
-    report_nm="주요사항보고서(전환사채권발행결정)",
-    rcept_no="1",
-    flr_nm="가비아",
+from briefing import analysis, verdict
+from briefing.models import (
+    Anomaly,
+    Briefing,
+    Disclosure,
+    EventBody,
+    Flag,
+    FlowDay,
+    InvestorFlows,
+    NewsItem,
+    SignalRow,
 )
-QUARTERLY = Disclosure(
-    rcept_dt=date(2026, 8, 7), report_nm="분기보고서 (2026.03)", rcept_no="2", flr_nm="가비아"
+
+D = date(2026, 8, 26)
+EV = {
+    "conditions": [{"label": "월봉 종가 > MA20", "ok": True, "actual": "9,500 vs 4,581"}],
+    "price": {"close": 3980, "change_pct": 19.16},
+}
+CB = Disclosure(
+    rcept_dt=D, report_nm="주요사항보고서(전환사채권발행결정)", rcept_no="cb1", flr_nm="씨피시스템"
+)
+QUARTERLY = Disclosure(rcept_dt=D, report_nm="반기보고서 (2026.06)", rcept_no="p1", flr_nm="x")
+CB_FLAG = Flag(rule="cb", level="red", rcept_no="cb1", report_nm=CB.report_nm)
+BODY = EventBody(
+    rcept_no="cb1",
+    event_type="cb_issuance",
+    amount=10_000_000_000,
+    use_of_funds=(("시설자금", 10_000_000_000),),
+    method="사모",
+    coupon_rate=0.0,
+    conv_price=5106,
+    overhang_pct=5.10,
+    outstanding=23_420_000_000,
 )
 NEWS = (
-    NewsItem(title="맥쿼리 공개매수 중인 가비아", link="https://n/1", published=date(2026, 8, 28)),
+    NewsItem(
+        title="씨피시스템, 100억 규모 CB 발행…전액 제2공장 투입",
+        link="https://n.news.naver.com/x",
+        published=D,
+        summary="조달자금은 전액 제2공장 설립에 필요한 시설투자에 사용될 예정이다.",
+    ),
+)
+FLOWS = InvestorFlows(
+    days=(
+        FlowDay(d=date(2026, 8, 25), inst=64_565, foreign=56_140_446, indiv=-56_426_416),
+        FlowDay(d=D, inst=-104_295, foreign=-1_139_791_314, indiv=1_131_306_196),
+    )
 )
 
 
-def brief(
-    level: str = "red", ticker: str = "079940", name: str = "가비아", **kw: object
-) -> Briefing:
-    base: dict[str, object] = {
-        "signal": SignalRow(d=D, strategy="mtf", ticker=ticker, name=name),
-        "corp_code": "1",
-        "level": level,
-        "disclosures": (CB, QUARTERLY),
-        "flags": (Flag(rule="cb", level="red", rcept_no="1", report_nm=CB.report_nm),),
-    }
-    base.update(kw)
-    return Briefing.from_signal(**base)  # type: ignore[arg-type]
-
-
-# ── 입력 구성 ────────────────────────────────────────────────────
-
-
-def test_build_input_skips_stocks_without_material() -> None:
-    """공시도 뉴스도 없으면 요약할 것이 없다 — LLM에 보내지 않는다."""
-    items = analysis.build_input([brief("none", disclosures=(), flags=())])
-    assert items == []
-
-
-def test_build_input_includes_titles_dates_and_level() -> None:
-    items = analysis.build_input([brief()])
-    assert len(items) == 1
-    it = items[0]
-    assert it["ticker"] == "079940" and it["name"] == "가비아" and it["level"] == "red"
-    assert it["disclosures"] == [
-        {"date": "08/22", "title": CB.report_nm, "flag": "red"},  # 걸린 공시는 표시된다
-        {"date": "08/07", "title": QUARTERLY.report_nm},
-    ]
-    assert it["risk_count"] == 1  # 건수는 사실로 준다 — 세라고 시키지 않는다
-    assert "news" not in it  # 뉴스가 없으면 키 자체를 넣지 않는다
-
-
-def test_build_input_includes_news_titles() -> None:
-    """등급 none 종목의 뉴스 제목도 입력에 넣는다 — 본문은 넣지 않는다 (F14)."""
-    items = analysis.build_input([brief("none", flags=(), disclosures=(QUARTERLY,), news=NEWS)])
-    assert items[0]["news"] == [{"date": "08/28", "title": NEWS[0].title}]
-    assert all("link" not in n for n in items[0]["news"])
-
-
-def test_build_input_carries_anomaly_verdict_only() -> None:
-    items = analysis.build_input(
-        [brief(anomaly=Anomaly(score=68, verdict="warning", summary="긴 설명"))]
-    )
-    assert items[0]["anomaly"] == {"score": 68, "verdict": "warning"}
-
-
-def test_build_input_skips_error_and_unknown() -> None:
-    assert analysis.build_input([brief("error"), brief("unknown")]) == []
-
-
-def test_build_input_caps_disclosures_per_stock() -> None:
-    many = tuple(
-        Disclosure(rcept_dt=D, report_nm=f"공시{i}", rcept_no=str(i), flr_nm="x") for i in range(30)
-    )
-    items = analysis.build_input([brief(disclosures=many)])
-    assert len(items[0]["disclosures"]) == analysis.MAX_DISCLOSURES
-
-
-def test_system_prompt_states_the_rules() -> None:
-    p = analysis.SYSTEM_PROMPT
-    for must in ("사실", "입력에 없는", "80자", "등급"):
-        assert must in p
-
-
-def test_schema_shape() -> None:
-    assert analysis.OUTPUT_SCHEMA["type"] == "object"
-    assert "items" in analysis.OUTPUT_SCHEMA["properties"]
-
-
-# ── 응답 검증 (N13) ──────────────────────────────────────────────
-
-
-def test_validate_keeps_good_items() -> None:
-    kept, dropped = analysis.validate(
-        {"items": [{"ticker": "079940", "summary": "08/22 전환사채 발행 결정 — 위험 유형 1건"}]},
-        ["079940"],
-    )
-    assert kept == {"079940": "08/22 전환사채 발행 결정 — 위험 유형 1건"} and dropped == []
-
-
-@pytest.mark.parametrize(
-    ("bad", "why"),
-    [
-        ({"ticker": "079940", "summary": "지금이 매수 기회"}, "금지어"),
-        ({"ticker": "079940", "summary": "가" * 81}, "길이"),
-        ({"ticker": "000000", "summary": "입력에 없는 종목"}, "미지 티커"),
-        ({"ticker": "079940", "summary": "   "}, "빈 문자열"),
-        ({"summary": "티커 없음"}, "티커 없음"),
-    ],
-)
-def test_validate_drops_bad_items_with_reason(bad: dict[str, str], why: str) -> None:
-    kept, dropped = analysis.validate({"items": [bad]}, ["079940"])
-    assert kept == {} and len(dropped) == 1 and why in dropped[0]
-
-
-def test_validate_keeps_the_good_and_drops_the_bad() -> None:
-    kept, dropped = analysis.validate(
-        {
-            "items": [
-                {"ticker": "079940", "summary": "정상 요약"},
-                {"ticker": "222040", "summary": "매도 권고"},
-            ]
-        },
-        ["079940", "222040"],
-    )
-    assert list(kept) == ["079940"] and len(dropped) == 1
-
-
-def test_validate_handles_garbage_payload() -> None:
-    assert analysis.validate({}, ["079940"]) == ({}, [])
-    assert analysis.validate({"items": "not a list"}, ["079940"]) == ({}, [])
-
-
-# ── 위험 유형 건수 (2026-08-30 실호출에서 잡힌 것) ───────────────
-#
-# 첫 실호출에서 씨피시스템 요약이 "최근 30일 위험 유형 2건"이라고 했다. 실제 플래그는 1건이다.
-# 입력에 플래그 정보가 아예 없어 모델이 `level: "red"`만 보고 숫자를 지어냈다.
-# 두 곳을 고친다: ① 건수를 입력에 사실로 넣는다 ② 코드가 숫자를 다시 검사한다 (N13).
-
-
-def flagged(**kw: object) -> Briefing:
-    cb = Disclosure(
-        rcept_dt=date(2026, 8, 26),
-        report_nm="주요사항보고서(전환사채권발행결정)",
-        rcept_no="cb1",
-        flr_nm="씨피시스템",
-    )
-    plain = Disclosure(
-        rcept_dt=date(2026, 8, 24),
-        report_nm="반기보고서 (2026.06)",
-        rcept_no="p1",
-        flr_nm="씨피시스템",
-    )
+def brief(level: str = "none", **kw: object) -> Briefing:
     base: dict[str, object] = {
         "signal": SignalRow(
-            d=date(2026, 8, 26), strategy="mtf", ticker="413630", name="씨피시스템", evidence={}
+            d=D, strategy="mtf", ticker="413630", name="씨피시스템", evidence=EV
         ),
-        "corp_code": "1",
-        "level": "red",
-        "disclosures": (cb, plain),
-        "flags": (Flag(rule="cb", level="red", rcept_no="cb1", report_nm=cb.report_nm),),
+        "corp_code": "01601222",
+        "level": level,
+        "disclosures": (QUARTERLY,),
     }
     base.update(kw)
     return Briefing.from_signal(**base)  # type: ignore[arg-type]
 
 
-def test_build_input_states_the_risk_count_as_a_fact() -> None:
-    """건수를 세라고 시키지 않는다 — 세어서 준다."""
-    (item,) = analysis.build_input([flagged()])
+def red() -> Briefing:
+    return brief("red", disclosures=(CB, QUARTERLY), flags=(CB_FLAG,), bodies=(BODY,),
+                 news=NEWS, flows=FLOWS, anomaly=Anomaly(score=0, verdict="clean"))
+
+
+def one(b: Briefing) -> dict[str, Any]:
+    (item,) = analysis.build_input([b], {b.ticker: verdict.judge(b)})
+    return item
+
+
+# ── 입력 구성 (F19) ──────────────────────────────────────────────
+
+
+def test_skips_stocks_with_nothing_to_check() -> None:
+    assert analysis.build_input([brief(disclosures=())], {}) == []
+
+
+def test_skips_stocks_we_could_not_look_up() -> None:
+    assert analysis.build_input([brief("error"), brief("unknown")], {}) == []
+
+
+def test_carries_the_chart_signal_being_checked() -> None:
+    """무엇을 검증하는지 모르면 검증할 수 없다."""
+    item = one(brief())
+    assert item["signal"]["strategy"] == "mtf"
+    assert item["signal"]["conditions"][0]["label"] == "월봉 종가 > MA20"
+
+
+def test_marks_which_disclosures_were_flagged() -> None:
+    item = one(red())
+    flagged = [d for d in item["disclosures"] if d.get("flag")]
+    assert [d["title"] for d in flagged] == [CB.report_nm]
     assert item["risk_count"] == 1
 
 
-def test_build_input_marks_which_disclosures_are_flagged() -> None:
-    """어느 공시가 걸렸는지 표시한다 — 표시가 없으면 등급만 보고 짐작한다."""
-    (item,) = analysis.build_input([flagged()])
-    marks = [d.get("flag") for d in item["disclosures"]]
-    assert marks == ["red", None]
+def test_carries_the_filing_body_in_units_a_model_can_hold() -> None:
+    """원 단위 큰 숫자를 그대로 주면 모델이 자릿수를 흘린다 — 억으로 바꿔 준다."""
+    (body,) = one(red())["bodies"]
+    assert body["amount_eok"] == 100.0
+    assert body["use_of_funds"] == [["시설자금", 100.0]]
+    assert body["overhang_pct"] == 5.10
+    assert body["outstanding_eok"] == 234.2
+    assert body["method"] == "사모"
 
 
-def test_build_input_omits_the_count_when_there_is_nothing_flagged() -> None:
-    (item,) = analysis.build_input([flagged(level="none", flags=())])
-    assert "risk_count" not in item
+def test_bodies_come_biggest_overhang_first() -> None:
+    small = EventBody(rcept_no="cb2", event_type="cb_issuance", overhang_pct=1.0)
+    b = brief("red", disclosures=(CB,), flags=(CB_FLAG,), bodies=(small, BODY))
+    assert [x["overhang_pct"] for x in one(b)["bodies"]] == [5.10, 1.0]
 
 
-def test_the_prompt_tells_the_model_not_to_count() -> None:
-    assert "risk_count" in analysis.SYSTEM_PROMPT
+def test_carries_news_with_its_summary() -> None:
+    """기사 요약이 분석의 주재료다 — 자금 용도가 거기 있다."""
+    (news,) = one(red())["news"]
+    assert "제2공장" in news["summary"]
 
 
-def test_validate_drops_a_summary_that_miscounts_the_risks() -> None:
-    """모델이 1건을 2건이라 적으면 버린다 — 지어낸 숫자는 사실보다 나빠 보인다."""
-    payload = {"items": [{"ticker": "413630", "summary": "08/26 전환사채 발행 — 위험 유형 2건"}]}
-    kept, dropped = analysis.validate(payload, ["413630"], risk_counts={"413630": 1})
-    assert kept == {}
-    assert any("건수" in d for d in dropped)
-
-
-def test_validate_keeps_a_summary_that_counts_correctly() -> None:
-    said = "08/26 전환사채 발행 — 위험 유형 1건"
-    kept, _ = analysis.validate(
-        {"items": [{"ticker": "413630", "summary": said}]}, ["413630"], risk_counts={"413630": 1}
+def test_carries_flows_as_totals_and_recent_days() -> None:
+    flows = one(red())["flows"]
+    assert flows["unit"] == "억원"
+    assert flows["total_30d"]["foreign"] == round(
+        (56_140_446 - 1_139_791_314) / 1e8, 1
     )
-    assert kept == {"413630": said}
+    assert [x["date"] for x in flows["recent"]] == ["08/25", "08/26"]
 
 
-def test_validate_ignores_the_count_check_when_the_summary_states_none() -> None:
-    """건수를 안 적은 요약은 이 검사와 무관하다."""
-    payload = {"items": [{"ticker": "413630", "summary": "08/26 전환사채 발행 결정"}]}
-    kept, _ = analysis.validate(payload, ["413630"], risk_counts={"413630": 1})
+def test_carries_the_verdict_the_code_computed() -> None:
+    """모델은 이것을 설명한다 — 다시 계산하지 않는다."""
+    item = one(red())
+    assert item["verdict"]["stand"] in verdict.STANDS
+    assert isinstance(item["verdict"]["score"], int)
+    assert item["verdict"]["parts"]
+
+
+def test_omits_absent_layers_rather_than_sending_empty_shells() -> None:
+    item = one(brief())
+    for key in ("bodies", "news", "flows", "risk_count"):
+        assert key not in item
+
+
+def test_caps_the_disclosure_list() -> None:
+    many = tuple(
+        Disclosure(rcept_dt=D, report_nm=f"공시{i}", rcept_no=str(i), flr_nm="x")
+        for i in range(30)
+    )
+    assert len(one(brief(disclosures=many))["disclosures"]) == analysis.MAX_DISCLOSURES
+
+
+# ── 프롬프트 (R21) ───────────────────────────────────────────────
+
+
+def test_the_prompt_says_the_cap_is_not_a_target() -> None:
+    """재료가 얇은데 2,000자를 채우려 들면 지어낸다 — 건수를 날조한 것과 같은 실패."""
+    assert "상한이지 목표가 아니다" in analysis.SYSTEM_PROMPT
+
+
+def test_the_prompt_forbids_changing_the_verdict() -> None:
+    assert "바꾸지 않는다" in analysis.SYSTEM_PROMPT
+
+
+def test_the_prompt_lists_every_forbidden_word() -> None:
+    from briefing.render import FORBIDDEN
+
+    for word in FORBIDDEN:
+        assert word in analysis.SYSTEM_PROMPT, word
+
+
+def test_the_schema_asks_for_a_reason_per_ticker() -> None:
+    props = analysis.OUTPUT_SCHEMA["properties"]["items"]["items"]["properties"]
+    assert set(props) == {"ticker", "reason"}
+
+
+# ── 검증 (N13 v2) ────────────────────────────────────────────────
+
+
+def ok_payload(text: str, ticker: str = "413630") -> dict[str, Any]:
+    return {"items": [{"ticker": ticker, "reason": text}]}
+
+
+def test_keeps_a_clean_reason() -> None:
+    kept, dropped = analysis.validate(ok_payload("08/26 전환사채 100억 발행 결정."), ["413630"])
+    assert kept == {"413630": "08/26 전환사채 100억 발행 결정."} and dropped == []
+
+
+@pytest.mark.parametrize("word", ["매수", "매도", "목표가", "손절", "진입", "비중", "보류"])
+def test_drops_a_reason_that_gives_trade_advice(word: str) -> None:
+    kept, dropped = analysis.validate(ok_payload(f"근거는 충분하다. {word} 판단."), ["413630"])
+    assert kept == {} and word in dropped[0]
+
+
+def test_allows_direction_words_that_v2_forbade() -> None:
+    """`호재`·`악재`는 근거의 방향을 말하는 데 필요하다 (N1 v2·D24)."""
+    kept, _ = analysis.validate(ok_payload("수급은 악재로 읽힌다."), ["413630"])
     assert kept
 
 
-def test_validate_without_risk_counts_still_works() -> None:
-    """인자를 안 넘겨도 기존 검사는 그대로다 — 호출부를 한 번에 안 고쳐도 된다."""
-    payload = {"items": [{"ticker": "413630", "summary": "08/26 전환사채 발행 — 위험 유형 9건"}]}
-    kept, _ = analysis.validate(payload, ["413630"])
+def test_drops_a_reason_longer_than_the_cap() -> None:
+    kept, dropped = analysis.validate(ok_payload("가" * (analysis.MAX_LEN + 1)), ["413630"])
+    assert kept == {} and "길이" in dropped[0]
+
+
+def test_a_long_but_allowed_reason_survives() -> None:
+    kept, _ = analysis.validate(ok_payload("가" * analysis.MAX_LEN), ["413630"])
     assert kept
+
+
+def test_drops_an_unknown_ticker() -> None:
+    kept, dropped = analysis.validate(ok_payload("x", "999999"), ["413630"])
+    assert kept == {} and "미지 티커" in dropped[0]
+
+
+def test_drops_an_empty_reason() -> None:
+    kept, dropped = analysis.validate(ok_payload("   "), ["413630"])
+    assert kept == {} and "빈 문자열" in dropped[0]
+
+
+# ── 판정을 바꾸면 버린다 (F18) ───────────────────────────────────
+
+
+def test_drops_a_reason_that_states_a_different_verdict() -> None:
+    """LLM은 설명한다. 결론을 바꾸면 그 서술은 쓸 수 없다."""
+    kept, dropped = analysis.validate(
+        ok_payload("세 갈래가 신호와 정합이다."), ["413630"], stands={"413630": "불일치"}
+    )
+    assert kept == {} and "판정을" in dropped[0]
+
+
+def test_keeps_a_reason_that_repeats_the_code_verdict() -> None:
+    kept, _ = analysis.validate(
+        ok_payload("수급이 거스른다 — 불일치."), ["413630"], stands={"413630": "불일치"}
+    )
+    assert kept
+
+
+# ── 숫자 대조 ────────────────────────────────────────────────────
+
+
+def test_drops_a_fabricated_risk_count() -> None:
+    """2026-08-30: 플래그 1건인 종목의 요약이 '위험 유형 2건'이라고 적었다."""
+    kept, dropped = analysis.validate(
+        ok_payload("최근 30일 위험 유형 2건."), ["413630"], risk_counts={"413630": 1}
+    )
+    assert kept == {} and "건수" in dropped[0]
+
+
+def test_keeps_a_correct_risk_count() -> None:
+    kept, _ = analysis.validate(
+        ok_payload("최근 30일 위험 유형 1건."), ["413630"], risk_counts={"413630": 1}
+    )
+    assert kept
+
+
+def test_drops_an_overhang_percent_that_was_never_in_the_input() -> None:
+    kept, dropped = analysis.validate(
+        ok_payload("전환 시 발행주식의 18.63%가 늘어난다."),
+        ["413630"],
+        overhangs={"413630": {5.10}},
+    )
+    assert kept == {} and "18.63" in dropped[0]
+
+
+def test_keeps_the_overhang_percent_that_was_in_the_input() -> None:
+    kept, _ = analysis.validate(
+        ok_payload("전환 시 발행주식의 5.10%가 늘어난다."),
+        ["413630"],
+        overhangs={"413630": {5.10}},
+    )
+    assert kept
+
+
+def test_a_percent_unrelated_to_overhang_is_left_alone() -> None:
+    """퍼센트는 등락률·지분율에도 쓰인다. 아무 `%`나 잡으면 멀쩡한 서술을 버린다."""
+    kept, _ = analysis.validate(
+        ok_payload("당일 주가가 19.16% 올랐다."), ["413630"], overhangs={"413630": {5.10}}
+    )
+    assert kept
+
+
+def test_a_malformed_payload_yields_nothing() -> None:
+    assert analysis.validate({"items": "x"}, ["413630"]) == ({}, [])
+    kept, dropped = analysis.validate({"items": ["x"]}, ["413630"])
+    assert kept == {} and dropped
