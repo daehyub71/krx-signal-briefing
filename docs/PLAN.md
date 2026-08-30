@@ -1,5 +1,49 @@
 # PLAN.md — krx-signal-briefing
 
+## v3.0 — 신호 검증으로의 전환 (2026-08-30, SPEC §2-4·§2-5)
+
+목적이 바뀌었으므로 **모듈 구성과 마일스톤 순서**가 바뀐다. M4(배포)보다 M6(검증)을 먼저 한다 —
+지금 형태로 매일 자동 발송해 봐야 읽히지 않는다는 것이 실사용으로 드러났다.
+
+### 새 모듈 (3층 분리는 그대로)
+
+| 층 | 모듈 | 하는 일 |
+|----|------|---------|
+| 도메인 | **`routine.py`** (신설) | 정형·정기 공시 판정 (F16). 규칙표 + 표본 테스트 |
+| 도메인 | **`verdict.py`** (신설) | 판정(정합/불일치/무관) + 점수(0~100) (F18). **LLM이 못 바꾸는 순수 함수** |
+| 도메인 | `summary.py` → **`analysis.py`** | 분석 입력 구성·출력 검증 (F19). 2,000자 · 판정 대조 |
+| 도메인 | `render.py` v3 | 판정·점수 열 · 정형 접기 · 본문 표 · 수급 표 · 발췌+링크 · 한계 문구 |
+| I/O | `dart_mcp.py` +`fetch_event()` | 걸린 공시의 본문 (F15) |
+| I/O | `news_mcp.py` v2 | 검색어·정렬·제목 필터·`description` (F11 v2) |
+| I/O | `store.py` +`fetch_flows_30d()` | 상위 `ksc_investor_flows` 읽기 (F17) |
+| I/O | **`page.py`** (신설) | 전문 페이지 생성 (F20). 비공개 |
+
+### 그래프는 노드를 늘리지 않는다
+
+`load_market`이 수급까지 읽고, `fetch_one`이 본문까지 받고, `summarize`가 `analyze`로 이름을 바꾼다.
+**노드 20줄 규칙은 그대로** — 늘어나는 로직은 전부 도메인 모듈로 간다.
+
+```
+gate → load_signals → load_corps → load_market(시세+수급30일)
+     → fan_out → fetch_one(공시+본문+판정+보조+뉴스)
+     → analyze(LLM 근거 서술) → render → persist → send_email → record_run → finalize
+```
+
+### 상위 프로젝트 변경 (사용자 승인 필요)
+
+`krx-stock-charts`에 **SPEC F14 신설** — `ksc_investor_flows` 테이블 + pykrx 수집(하루 6회).
+D14 v2(시총)와 같은 패턴이다. 우리 쪽 새 의존성·새 키는 0개.
+
+### 순서
+
+1. **먼저 고칠 것** — 재실행이 뉴스·보조 신호를 지우는 결함(2026-08-30 실측 소실), 상위 KRX 로그인 실패(R22)
+2. 재료 늘리기 — `routine` · 공시 본문 · 뉴스 v2 · 수급
+3. 판정·서술 — `verdict` · `analysis`
+4. 본문·전문 페이지 — **DESIGN.md v2 합의 후** 구현
+5. 검증 — 손검증 5종목 · 세 실패 경우 모두 메일 도착
+
+---
+
 > **상태: 확정 v1.0** (2026-08-26). SPEC v1.1(D1~D11 확정 · D3 = `repository_dispatch`)을 입력으로 작성. 사용자가 TASKS.md 작성을 지시해 확정으로 본다.
 > 구조는 `../krx-signal-alerts/docs/PLAN.md`를 따른다 — 같은 3층 분리, 같은 그래프 규칙. 오가기 쉬워야 한다.
 
