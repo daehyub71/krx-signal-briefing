@@ -24,7 +24,9 @@ from briefing.models import (
     Disclosure,
     Flag,
     Flow,
+    FlowDay,
     Insider,
+    InvestorFlows,
     NewsItem,
     RunRecord,
     SignalRow,
@@ -115,6 +117,71 @@ def fetch_signal_rows_since(c: psycopg.Connection[Any], since: date) -> list[Sig
         (since,),
     ).fetchall()
     return [SignalRow(d=d, strategy=str(s), ticker=str(t), name=str(n)) for d, s, t, n in rows]
+
+
+FLOW_WINDOW_DAYS = 30  # 수급을 볼 거래일 수 (F17)
+
+
+def _foreign_total(foreign: int | None, foreign_etc: int | None) -> int | None:
+    """외국인합계 = 외국인 + 기타외국인.
+
+    상위는 둘을 따로 담는다 — pykrx의 `get_market_net_purchases_of_equities_by_ticker`가
+    `외국인합계`를 인자로 받지 않기 때문이다 (상위 2026-08-30 실측).
+    **둘 다 없으면 None이다** — 0으로 채우면 "거래가 없었다"가 "값이 없다"를 덮는다.
+    """
+    got = [v for v in (foreign, foreign_etc) if v is not None]
+    return sum(got) if got else None
+
+
+def fetch_flows_30d(
+    c: psycopg.Connection[Any],
+    tickers: Sequence[str],
+    days: int = FLOW_WINDOW_DAYS,
+) -> dict[str, InvestorFlows]:
+    """기관·외국인·개인 순매수 최근 N거래일 (F17·D22).
+
+    **호출 0회, 키 0개.** 상위 `krx-stock-charts`가 매일 채운 `ksc_investor_flows`를
+    SQL 한 번으로 읽는다 (상위 SPEC F14, 2026-08-30 신설 — 시총 F8과 같은 방식).
+
+    종목마다 마지막 N거래일을 따로 센다. 어떤 종목은 거래정지로 행이 적을 수 있는데,
+    날짜로 자르면 그런 종목의 창이 조용히 짧아진다.
+
+    Args:
+        c: DB 연결.
+        tickers: 대상 종목.
+        days: 종목당 거래일 수.
+
+    Returns:
+        `{ticker: InvestorFlows}` — 날짜 오름차순. **행이 없는 종목은 빠진다**
+        (호출자가 `⚠ 수급 생략`으로 표기한다, D15).
+    """
+    if not tickers:
+        return {}
+    rows = c.execute(
+        """
+        select f.ticker, f.d, f.inst_net, f.foreign_net, f.foreign_etc_net, f.indiv_net
+          from ksc_investor_flows f
+          join lateral (
+              select d from ksc_investor_flows
+               where ticker = f.ticker
+               order by d desc limit %s
+          ) w on w.d = f.d
+         where f.ticker = any(%s)
+         order by f.ticker, f.d
+        """,
+        (days, list(tickers)),
+    ).fetchall()
+    out: dict[str, list[FlowDay]] = {}
+    for ticker, d, inst, foreign, foreign_etc, indiv in rows:
+        out.setdefault(str(ticker), []).append(
+            FlowDay(
+                d=d,
+                inst=None if inst is None else int(inst),
+                foreign=_foreign_total(foreign, foreign_etc),
+                indiv=None if indiv is None else int(indiv),
+            )
+        )
+    return {t: InvestorFlows(days=tuple(v)) for t, v in out.items()}
 
 
 def fetch_flows(

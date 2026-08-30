@@ -214,3 +214,79 @@ def test_fetch_briefings_tolerates_rows_written_before_those_columns_existed() -
     row.update({"anomaly": None, "insider": None, "flow": None, "news": None, "summary": None})
     b = store.fetch_briefings(cast("Any", RowCursor([row])), date(2026, 8, 26))["mtf:413630"]
     assert b.anomaly is None and b.flow is None and b.news == () and b.summary is None
+
+
+# ── 수급 30일 읽기 (F17, v3.0) ───────────────────────────────────
+#
+# 상위 `krx-stock-charts`가 매일 채운 `ksc_investor_flows`를 **SQL 한 번**으로 읽는다.
+# 외부 호출 0회, 새 키 0개 — 시총(F12)과 같은 방식이다.
+# 상위가 `외국인`과 `기타외국인`을 따로 담으므로 **외국인합계는 여기서 만든다**
+# (pykrx의 그 엔드포인트가 `외국인합계`를 받지 않는다 — 상위 2026-08-30 실측).
+
+
+class FlowCursor:
+    """`ksc_investor_flows` 조회 대역. 넘어온 SQL과 인자를 남긴다."""
+
+    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+        self.rows = rows
+        self.sql = ""
+        self.params: Any = None
+
+    def execute(self, sql: str, params: Any = None) -> FlowCursor:
+        self.sql, self.params = sql, params
+        return self
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return self.rows
+
+
+def test_fetch_flows_30d_groups_days_by_ticker_ascending() -> None:
+    rows = [
+        ("413630", date(2026, 8, 25), 1, 2, 3, 4),
+        ("413630", date(2026, 8, 26), 5, 6, 7, 8),
+        ("227950", date(2026, 8, 26), 9, 10, 11, 12),
+    ]
+    got = store.fetch_flows_30d(cast("Any", FlowCursor(rows)), ["413630", "227950"])
+    assert sorted(got) == ["227950", "413630"]
+    assert [d.d.day for d in got["413630"].days] == [25, 26]
+
+
+def test_fetch_flows_30d_builds_the_foreign_total() -> None:
+    """상위는 `외국인`과 `기타외국인`을 따로 담는다 — 합계는 읽는 쪽이 만든다."""
+    rows = [("413630", date(2026, 8, 26), 100, -20, -5, 300)]
+    got = store.fetch_flows_30d(cast("Any", FlowCursor(rows)), ["413630"])
+    (day,) = got["413630"].days
+    assert day.inst == 100
+    assert day.foreign == -25  # -20 + -5
+    assert day.indiv == 300
+
+
+def test_fetch_flows_30d_keeps_a_missing_investor_null() -> None:
+    """한쪽만 없으면 있는 쪽을 쓰고, 둘 다 없으면 None — 0으로 채우지 않는다."""
+    rows = [
+        ("413630", date(2026, 8, 25), None, -20, None, None),
+        ("413630", date(2026, 8, 26), None, None, None, None),
+    ]
+    got = store.fetch_flows_30d(cast("Any", FlowCursor(rows)), ["413630"])
+    first, second = got["413630"].days
+    assert first.foreign == -20 and first.inst is None
+    assert second.foreign is None
+
+
+def test_fetch_flows_30d_asks_for_the_window_and_the_tickers() -> None:
+    c = FlowCursor([])
+    store.fetch_flows_30d(cast("Any", c), ["413630"], days=30)
+    assert "ksc_investor_flows" in c.sql
+    assert c.params is not None and 30 in c.params
+
+
+def test_fetch_flows_30d_without_tickers_does_not_query() -> None:
+    c = FlowCursor([])
+    assert store.fetch_flows_30d(cast("Any", c), []) == {}
+    assert c.sql == ""
+
+
+def test_fetch_flows_30d_returns_nothing_for_a_ticker_with_no_rows() -> None:
+    """상위가 아직 안 채웠으면 그 종목은 빠진다 — 호출자가 '생략'으로 표기한다 (D15)."""
+    got = store.fetch_flows_30d(cast("Any", FlowCursor([])), ["413630"])
+    assert got == {}

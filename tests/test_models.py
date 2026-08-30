@@ -97,6 +97,7 @@ def test_briefing_to_row_matches_schema_columns() -> None:
         "flow",
         "news",
         "bodies",
+        "flows",
     }
     assert row["d"] == "2026-08-25"
     assert row["level"] == "red"
@@ -267,3 +268,67 @@ def test_signal_row_empties_only_the_missing_field_of_a_condition() -> None:
 
 def test_signal_row_ignores_a_meta_that_is_not_a_dict() -> None:
     assert ev({"meta": "진행중"}).in_progress is False
+
+
+# ── 수급 30일 (F17, v3.0) ────────────────────────────────────────
+#
+# 세 갈래 증거의 셋째. 씨피시스템 CB 공시일에 외국인이 11.3억을 팔고 개인이 11.3억을 샀다 —
+# 공시와 뉴스만으로는 보이지 않는 사실이다.
+
+from briefing.models import FlowDay, InvestorFlows  # noqa: E402
+
+
+def flows(*rows: tuple[int, int | None, int | None, int | None]) -> InvestorFlows:
+    return InvestorFlows(
+        days=tuple(
+            FlowDay(d=date(2026, 8, day), inst=i, foreign=f, indiv=p) for day, i, f, p in rows
+        )
+    )
+
+
+def test_totals_sum_the_window() -> None:
+    f = flows((25, 10, -20, 10), (26, 5, -30, 25))
+    assert f.inst_total == 15 and f.foreign_total == -50 and f.indiv_total == 35
+
+
+def test_totals_skip_nulls_without_counting_them_as_zero() -> None:
+    """그 투자자 표에 종목이 없던 날과 0원이던 날은 다르다."""
+    f = flows((25, None, 0, None), (26, 7, None, None))
+    assert f.inst_total == 7
+    assert f.foreign_total == 0  # 0원은 값이다
+    assert f.indiv_total is None  # 값이 하나도 없으면 None
+
+
+def test_totals_of_an_empty_window_are_none() -> None:
+    assert InvestorFlows().inst_total is None
+
+
+def test_on_finds_the_day_a_filing_landed() -> None:
+    """공시일 당일 수급이 이 데이터를 모으는 이유다."""
+    f = flows((25, 1, 2, 3), (26, 4, 5, 6))
+    day = f.on(date(2026, 8, 26))
+    assert day is not None and day.foreign == 5
+    assert f.on(date(2026, 8, 27)) is None
+
+
+def test_recent_takes_the_tail_since_days_are_ascending() -> None:
+    f = flows((24, 1, 1, 1), (25, 2, 2, 2), (26, 3, 3, 3))
+    assert [x.d.day for x in f.recent(2).days] == [25, 26]
+
+
+def test_recent_of_zero_is_empty() -> None:
+    assert flows((24, 1, 1, 1)).recent(0).days == ()
+
+
+def test_to_json_keeps_the_series_in_order() -> None:
+    rows = flows((25, 1, 2, 3), (26, 4, 5, 6)).to_json()
+    assert [r["d"] for r in rows] == ["2026-08-25", "2026-08-26"]
+    assert rows[1]["foreign"] == 5
+
+
+def test_briefing_row_carries_flows_and_null_when_absent() -> None:
+    b = make_briefing(flows=flows((26, 1, 2, 3)))
+    assert b.to_row()["flows"] == [
+        {"d": "2026-08-26", "inst": 1, "foreign": 2, "indiv": 3}
+    ]
+    assert make_briefing().to_row()["flows"] is None

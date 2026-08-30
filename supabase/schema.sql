@@ -68,6 +68,9 @@ alter table ksb_briefings add column if not exists insider jsonb;
 -- 공시 본문 (F15, v3.0) — 플래그된 공시만. 오버행 비율·자금용도·전환가·미상환잔액이 여기 있다.
 -- 제목 한 줄로는 같아 보이는 두 전환사채가 5.10%와 18.63%로 갈린다 (2026-08-26 실측).
 alter table ksb_briefings add column if not exists bodies jsonb not null default '[]'::jsonb;
+-- 기관·외국인 수급 30일 (F17, v3.0) — 상위 `ksc_investor_flows`에서 읽어 담는다.
+-- 날짜 오름차순 배열. 생략됐으면 null (0건과 다르다).
+alter table ksb_briefings add column if not exists flows jsonb;
 
 -- 종목축 조회(드라이런·이력)용. PK는 (d, strategy, ticker) 순서라 종목축을 못 받는다.
 create index if not exists ksb_briefings_by_ticker

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Literal, get_args
@@ -259,6 +260,67 @@ class Flow:
 
 
 @dataclass(frozen=True, slots=True)
+class FlowDay:
+    """하루치 투자자별 순매수거래대금(원) — 상위 `ksc_investor_flows` 한 행 (SPEC F17)."""
+
+    d: date
+    inst: int | None = None  # 기관합계
+    foreign: int | None = None  # 외국인합계 = 외국인 + 기타외국인 (상위는 따로 담는다)
+    indiv: int | None = None  # 개인
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "d": self.d.isoformat(),
+            "inst": self.inst,
+            "foreign": self.foreign,
+            "indiv": self.indiv,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class InvestorFlows:
+    """종목 하나의 수급 30일 (SPEC F17, v3.0). 날짜 **오름차순**.
+
+    누가 사고 팔았는지가 세 갈래 증거의 셋째다. 씨피시스템 CB 공시일에 외국인이
+    11.3억을 팔고 개인이 11.3억을 샀다 — 공시와 뉴스만으로는 보이지 않는 사실이다.
+
+    합계는 **`None`을 0으로 세지 않는다.** 그 투자자 표에 종목이 없던 날과
+    순매수가 0원이던 날은 다르다.
+    """
+
+    days: tuple[FlowDay, ...] = ()
+
+    @staticmethod
+    def _sum(values: Iterable[int | None]) -> int | None:
+        got = [v for v in values if v is not None]
+        return sum(got) if got else None
+
+    @property
+    def inst_total(self) -> int | None:
+        """기간 누적 기관 순매수(원). 값이 하나도 없으면 None."""
+        return self._sum(x.inst for x in self.days)
+
+    @property
+    def foreign_total(self) -> int | None:
+        return self._sum(x.foreign for x in self.days)
+
+    @property
+    def indiv_total(self) -> int | None:
+        return self._sum(x.indiv for x in self.days)
+
+    def on(self, day: date) -> FlowDay | None:
+        """그날의 수급. **공시일 당일**을 보려고 있다."""
+        return next((x for x in self.days if x.d == day), None)
+
+    def recent(self, n: int = 5) -> InvestorFlows:
+        """최근 n거래일만."""
+        return InvestorFlows(days=self.days[-n:] if n > 0 else ())
+
+    def to_json(self) -> list[dict[str, Any]]:
+        return [x.to_json() for x in self.days]
+
+
+@dataclass(frozen=True, slots=True)
 class EventBody:
     """플래그된 공시의 **본문** (SPEC F15, v3.0).
 
@@ -364,6 +426,7 @@ class Briefing:
     flow: Flow | None = None  # F12 시세 참고 (v2.0). None = 생략됨
     news: tuple[NewsItem, ...] = ()  # F11 뉴스. 빈 튜플 = 없음·생략
     bodies: tuple[EventBody, ...] = ()  # F15 공시 본문 (플래그된 공시만, v3.0)
+    flows: InvestorFlows | None = None  # F17 기관·외국인 수급 30일 (v3.0). None = 생략됨
     # 아래 넷은 상위 evidence에서 그대로 온 표시용 값이다 (열이 아니다 — 렌더가 쓴다)
     conditions: tuple[tuple[str, bool, str], ...] = ()
     close: int = 0
@@ -388,6 +451,7 @@ class Briefing:
         flow: Flow | None = None,
         news: tuple[NewsItem, ...] = (),
         bodies: tuple[EventBody, ...] = (),
+        flows: InvestorFlows | None = None,
         summary: str | None = None,
         source: str = "mcp",
         skipped: tuple[str, ...] = (),
@@ -412,6 +476,7 @@ class Briefing:
             flow=flow,
             news=news,
             bodies=bodies,
+            flows=flows,
             summary=summary,
             source=source,
             skipped=skipped,
@@ -448,6 +513,7 @@ class Briefing:
             "flow": self.flow.to_json() if self.flow else None,
             "news": [n.to_json() for n in self.news] if self.news else None,
             "bodies": [b.to_json() for b in self.bodies],
+            "flows": None if self.flows is None else self.flows.to_json(),
         }
 
 
