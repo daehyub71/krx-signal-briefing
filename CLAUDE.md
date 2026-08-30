@@ -97,6 +97,7 @@ pytest tests/ -v    # 3. 테스트
 - **`stop_reason == "refusal"`을 먼저 본다** — Opus 5는 거부 응답을 HTTP 200으로 준다. content를 읽기 전에 확인.
 - **DART `013`은 오류가 아니다** — "조회된 데이터가 없습니다" = 공시 0건. `020`은 한도 초과.
 - **DART 제목은 흔들린다** — `유상증자결정` / `유상증자 결정` / `[정정]유상증자결정` / `ㆍ`. `flags.normalize()`를 거치지 않은 매칭은 미탐.
+- **`evidence`는 우리가 통제하지 않는 계약이다** (R8) — `null`로 오거나, 종가가 `"8,420"`처럼 쉼표 낀 문자열로 오거나, `conditions`가 목록이 아닐 수 있다. `SignalRow`가 전부 빈 값으로 떨어뜨린다(`ev`·`_as_int`·`_as_float`). **`evidence`를 직접 `.get()`으로 파헤치지 말고 `SignalRow` 프로퍼티를 쓴다** — 직접 읽으면 그날 메일이 통째로 사라진다.
 - **`ksa_signals.sent_email`은 항상 false다** — 상위가 저장하지 않는다. 메일 집합은 `suppressed = false` (SPEC F2, 2026-08-26 실측).
 - **게이트는 이벤트가 아니라 DB를 믿는다** — dispatch는 "워크플로가 끝났다"만 말한다. `ksa_runs` 오늘 행이 없으면 1분×10회 기다렸다 `gate_timeout`.
 - **체크포인터를 쓰지 않는다** — 단발 배치. 상태에 API 키가 섞이면 디스크에 남는다.

@@ -14,11 +14,11 @@
 | M1 DART 계층 ★ TDD | `██████████` | 100% | 10/10 | ✅ 2026-08-29 |
 | **M1b MCP 계층** (v2.0) | `██████████` | 100% | 10/10 | ✅ 2026-08-29 |
 | **M1c 뉴스** (v2.0) | `██████████` | 100% | 5/5 | ✅ 2026-08-29 |
-| M2 본문·저장·발송 | `██████████` | 100% | 9/9 | ✅ 2026-08-29 |
+| M2 본문·저장·발송 | `██████████` | 100% | 10/10 | ✅ 2026-08-29 |
 | M3 Claude 요약 | `░░░░░░░░░░` | 0% | 0/8 | 🔜 |
 | M4 자동화·배포 | `░░░░░░░░░░` | 0% | 0/11 | 🔜 |
 | M5 마무리 | `░░░░░░░░░░` | 0% | 0/5 | 🔜 |
-| **전체** | `███████░░░` | **66%** | **46/70** | 🔜 M3 |
+| **전체** | `███████░░░` | **66%** | **47/71** | 🔜 M3 |
 
 범례: 🔜 대기 · 🔄 진행중 · ✅완료일
 
@@ -129,15 +129,16 @@
 
 ## M2 — 본문·저장·발송
 
-- [ ] `briefing/render.py` — 종목 블록 TDD: 조건 5줄(`evidence.conditions` 그대로) + 구분선 + 등급 + 공시 목록 + **원문 링크 필수**(N2) · `evidence` 키 누락 시 줄만 비움(R8)
-- [ ] `render.py` — 🔴 상단 요약 블록 · 전략/종목 **순서 = 상위 메일과 동일** · HTML 이스케이프(`&` 이름) · 평문 대체본
-- [ ] `render.py` — 제목 4종(F8): 정상 · `[브리핑 없음]` 0건 · 데이터 지연 · `⚠ 공시 조회 실패 N건` 접두
-- [ ] `render.py` — **금지어 테스트**(N1): `추천`·`매수`·`매도`·`보류`·`호재`·`악재`·`목표가`·`손절`·`여력`·`이탈`·단독 `없음` — `report_nm` 원문은 검사 제외 · `none` 문구는 "최근 30일 공시 중 확인된 위험 유형 없음"
-- [ ] `render.py` — `⚠ 요약 생성 실패` 줄 · `unknown`(DART 코드 미확인) · `error`(공시 조회 실패) 표기
-- [ ] `briefing/store.py` — `ksa_signals` 대상 조회(F2) · 기존 `ksb_briefings` 읽기 · `ksb_briefings` upsert · `ksb_runs` insert — mock 테스트
-- [ ] `briefing/notify.py` — SMTP mock · STARTTLS · `certifi` · 평문+HTML multipart
-- [ ] `load_signals` · `load_corps` · `render` · `persist` · `send_email` · `record_run` · `finalize` 노드 실구현 (각 20줄 이내)
-- [ ] **실DB + 실발송 1회** (`--date`로 어제 신호, 요약 없이) → 두 번째 메일 도착 · 받은편지함 확인 · **재실행 시 DART 재호출 없음**(N6)
+- [x] `briefing/render.py` — 종목 블록 TDD: 조건 5줄(`evidence.conditions` 그대로) + 구분선 + 등급 + 공시 목록 + **원문 링크 필수**(N2) · `evidence` 키 누락 시 줄만 비움(R8) — 테스트 16개. **R8 구멍 2개를 이 테스트가 잡았다**(아래 트러블슈팅)
+- [x] `render.py` — 🔴 상단 요약 블록 · 전략/종목 **순서 = 상위 메일과 동일** · HTML 이스케이프(`&` 이름) · 평문 대체본
+- [x] **레이아웃 재설계** (2026-08-29 시안 합의 · `docs/DESIGN.md`) — 인덱스 표 + 종목 카드 · 제목이 곧 링크 · 이모지→색 칩 · 압축 카드 · **길이 예산**(N15)
+- [x] `render.py` — 제목 4종(F8): 정상 · `[브리핑 없음]` 0건 · 데이터 지연 · `⚠ 공시 조회 실패 N건` 접두
+- [x] `render.py` — **금지어 테스트**(N1): `추천`·`매수`·`매도`·`보류`·`호재`·`악재`·`목표가`·`손절`·`여력`·`이탈`·단독 `없음` — `report_nm` 원문은 검사 제외 · `none` 문구는 "최근 30일 공시 중 확인된 위험 유형 없음"
+- [x] `render.py` — `⚠ 요약 생성 실패` 줄 · `unknown`(DART 코드 미확인) · `error`(공시 조회 실패) 표기
+- [x] `briefing/store.py` — `ksa_signals` 대상 조회(F2) · 기존 `ksb_briefings` 읽기 · `ksb_briefings` upsert · `ksb_runs` insert — mock 테스트
+- [x] `briefing/notify.py` — SMTP mock · STARTTLS · `certifi` · 평문+HTML multipart
+- [x] `load_signals` · `load_corps` · `render` · `persist` · `send_email` · `record_run` · `finalize` 노드 실구현 (각 20줄 이내)
+- [x] **실DB + 실발송 1회** (`--date`로 어제 신호, 요약 없이) → 두 번째 메일 도착 · 받은편지함 확인 · **재실행 시 DART 재호출 없음**(N6)
 
 **완료 기준**
 - 요약 없는 브리핑 메일이 실제로 도착 · 금지어·링크 테스트 통과 · 멱등 확인
@@ -203,6 +204,7 @@
 | M1b MCP 기동 (2026-08-29, 로컬 Node 22 · mcp 2.1.1) | korean-dart-mcp@0.10.1 **콜드 10.9초 / 웜 0.6초**, 도구 18 · korea-stock-mcp@1.4.1 1.4 / 0.5초, 도구 8 · naver-search-mcp@1.0.50 **키 없으면 기동 거부**. 도구 호출: search_disclosures 0.1초(페이지 20건 → `all_pages` 필요) · disclosure_anomaly 2.3초 · insider_signal 0.4초 | 2026-08-29 |
 | M1b 시세 경로 전환 (2026-08-29) | 세 경로 비교 후 **상위 DB 경유 채택**: ① pykrx 직접(키 불필요·호출 1회·의존성 +pykrx) ② **상위 수집 → 우리는 SQL**(채택) ③ korea-stock-mcp(KRX OPEN API 키 필요·≤18회). 상위 `update --update`에 pykrx 1회가 늘고, 우리 쪽 외부 호출은 0회가 됐다. 실측: 상위 2,767/2,769종목 수집, `ksc_tickers.mktcap` null 2종목 | 2026-08-29 |
 | M1b dart_mcp ≡ REST (2026-08-29) | `search_disclosures` 인자별: all_pages만 53 · **all_pages+include_corrections 61** · page size=100 61 · days=30+all_pages 53 — REST 61과 일치하는 조합으로 고정. 실서버 통합 테스트 통과(집합·정렬 동일) | 2026-08-29 |
+| **M2 evidence 방어 구멍 (2026-08-29)** | 종목 블록 TDD를 쓰다 R8이 **모델 층에서 깨져 있는 것**을 발견. ① `evidence`가 `null`이면 `.get`에서 `AttributeError` ② 종가가 `"8,420"`(쉼표 낀 문자열)이면 `int()`가 `ValueError`. 둘 다 **그날 메일이 통째로 사라지는** 실패다. `SignalRow.ev`·`_as_int`·`_as_float`로 막고, `conditions`가 목록이 아닌 경우·조건 항목의 키 누락까지 테스트로 잠금 (모델 6개 + 렌더 10개) | 2026-08-29 |
 | **M2 레이아웃 재설계 (2026-08-29)** | 첫 실메일이 `<pre>` 한 덩어리라 읽히지 않음 → **Claude Design 3안 시안 → 추천안(인덱스 표 + 카드) 사용자 합의** → 구현. 눈에 보이는 글자수 **18,012 → 6,539자**. `docs/DESIGN.md` 신설, SPEC F7 v2 · F7b · N15 | 2026-08-29 |
 | **M2 Gmail 클리핑 (2026-08-29)** | 시안 1차가 **149,971 bytes**로 Gmail에 잘림(한계 102,400). 스타일을 클래스로 접고(→111,339) 평문 대체본을 위험 종목만 펼치게 바꿔 **78,269 bytes·여유 24%**. `test_real_sized_mail_fits_in_a_gmail_message`가 실제 `EmailMessage` 크기로 잠금 | 2026-08-29 |
 | M2 실메일 1통 (2026-08-29 12:49) | 08/26 신호 15건 · DART 15회 · 출처 전부 mcp · 생략 0 · anomaly clean 7·watch 7·warning 1 · **none 13종목 전부 뉴스 부착** · 발송 1명 성공. 본문 18,012자(제한 전 24,497) | 2026-08-29 |

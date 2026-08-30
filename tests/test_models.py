@@ -224,3 +224,45 @@ def test_briefing_to_row_includes_anomaly_and_insider_columns() -> None:
 def test_briefing_to_row_anomaly_insider_null_when_absent() -> None:
     row = make_briefing().to_row()
     assert row["anomaly"] is None and row["insider"] is None
+
+
+# ── R8: evidence가 흔들려도 값만 비운다 ──────────────────────────
+#
+# 상위 `ksa_signals.evidence`는 우리가 통제하지 않는 계약이다. 아래 모양들이 실제로 온다.
+
+
+def ev(payload: object) -> SignalRow:
+    return SignalRow(d=D, strategy="mtf", ticker="079940", name="가비아", evidence=payload)  # type: ignore[arg-type]
+
+
+def test_signal_row_survives_a_null_evidence() -> None:
+    """DB가 jsonb를 null로 주는 날이 있다."""
+    s = ev(None)
+    assert s.conditions == () and s.close == 0 and s.change_pct == 0.0
+    assert s.in_progress is False
+
+
+def test_signal_row_reads_a_price_that_is_not_a_number() -> None:
+    """`int("8,420")`은 예외다 — 방어하지 않으면 그날 메일이 통째로 사라진다."""
+    s = ev({"price": {"close": "8,420", "change_pct": "n/a"}})
+    assert s.close == 0 and s.change_pct == 0.0
+
+
+def test_signal_row_accepts_numeric_strings() -> None:
+    """쉼표 없는 숫자 문자열은 읽는다 — 상위가 문자열로 바꿔도 값은 살린다."""
+    s = ev({"price": {"close": "8420", "change_pct": "1.32"}})
+    assert s.close == 8420 and s.change_pct == 1.32
+
+
+def test_signal_row_ignores_conditions_that_are_not_a_list() -> None:
+    assert ev({"conditions": "정배열"}).conditions == ()
+    assert ev({"conditions": {"label": "x"}}).conditions == ()
+
+
+def test_signal_row_empties_only_the_missing_field_of_a_condition() -> None:
+    s = ev({"conditions": [{"ok": True}, {"label": "월봉", "ok": True, "actual": "9,500"}]})
+    assert s.conditions == (("", True, ""), ("월봉", True, "9,500"))
+
+
+def test_signal_row_ignores_a_meta_that_is_not_a_dict() -> None:
+    assert ev({"meta": "진행중"}).in_progress is False

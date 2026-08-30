@@ -579,3 +579,103 @@ def test_real_sized_mail_fits_in_a_gmail_message() -> None:
     msg.set_content(render.text(bs, D))
     msg.add_alternative(render.html(bs, D), subtype="html")
     assert len(bytes(msg)) < render.GMAIL_CLIP_BYTES
+
+
+# ── 종목 블록 계약 (F7 · N2 · R8) ────────────────────────────────
+#
+# 상위 `ksa_signals.evidence`가 이 블록의 유일한 입력이다. 상위가 키를 바꾸거나
+# 값 모양을 바꿔도 **메일 전체가 죽으면 안 된다** (R8) — 해당 줄만 비우고 계속 간다.
+
+
+def sig_ev(ev: object) -> SignalRow:
+    """evidence를 통째로 갈아끼운 신호 — R8 시험용."""
+    return SignalRow(d=D, strategy="mtf", ticker="079940", name="가비아", evidence=ev)  # type: ignore[arg-type]
+
+
+def test_block_renders_conditions_verbatim_and_in_order() -> None:
+    """조건 줄은 `evidence.conditions`를 **그대로** 편다 — 상위 메일과 나란히 읽는다."""
+    body = render.text([briefing("amber")], D)
+    lines = [ln.strip() for ln in body.splitlines() if ln.strip().startswith(("✓", "✗"))]
+    assert lines == [
+        "✓ 월봉 종가 > MA20 : 9,500 vs 4,581",
+        "✓ 일봉 종가 > MA20 > MA60 : 8,420 > 8,407 > 7,490",
+    ]
+
+
+def test_block_marks_an_unmet_condition() -> None:
+    ev = {"conditions": [{"label": "월봉 종가 > MA20", "ok": False, "actual": "9,500 vs 9,900"}]}
+    b = Briefing.from_signal(sig_ev(ev), "1", "amber")
+    assert "✗ 월봉 종가 > MA20 : 9,500 vs 9,900" in render.text([b], D)
+
+
+def test_block_has_a_rule_between_the_signal_and_our_findings() -> None:
+    """구분선 위는 상위가 보낸 것, 아래가 이 프로젝트의 산출물이다."""
+    body = render.text([briefing("amber")], D)
+    block = body[body.index("가비아 [079940]") :]
+    i_cond = block.index("월봉 종가 > MA20")
+    i_rule = block.index(render.RULE)
+    i_grade = block.index("공시 1건")
+    assert i_cond < i_rule < i_grade
+
+
+def test_every_disclosure_carries_its_source_link(subtests: object = None) -> None:
+    """**원문 링크 필수** (N2) — 평문은 URL로, HTML은 제목에 건 앵커로."""
+    b = briefing("amber", disclosures=(CB, QUARTERLY))
+    body = render.text([b], D)
+    for d in (CB, QUARTERLY):
+        assert dart_link(d.rcept_no) in body
+    doc = render.html([b], D)
+    for d in (CB, QUARTERLY):
+        assert f'<a href="{dart_link(d.rcept_no)}"' in doc
+
+
+# ── R8: evidence가 흔들려도 줄만 비운다 ──────────────────────────
+
+
+def test_missing_evidence_empties_the_lines_but_keeps_the_block() -> None:
+    """상위가 `evidence`를 통째로 비워도 종목 블록은 남는다 — 공시가 본체다."""
+    b = Briefing.from_signal(sig_ev({}), "1", "none", disclosures=(QUARTERLY,))
+    body = render.text([b], D)
+    assert "가비아 [079940]" in body  # 종목 줄은 남는다
+    assert "원 +" not in body  # 종가·등락은 비었다
+    assert not [ln for ln in body.splitlines() if ln.strip().startswith(("✓", "✗"))]
+    assert QUARTERLY.report_nm in render.html([b], D)
+
+
+def test_null_evidence_does_not_kill_the_mail() -> None:
+    """DB가 `evidence`를 null로 주는 날이 있다 — 그날 메일이 통째로 죽으면 안 된다."""
+    b = Briefing.from_signal(sig_ev(None), "1", "none", disclosures=(QUARTERLY,))
+    assert "가비아" in render.text([b], D)
+    assert "가비아" in render.html([b], D)
+
+
+def test_condition_with_missing_keys_empties_only_that_line() -> None:
+    """조건 항목에서 키가 빠지면 그 줄만 빈다 — 나머지 조건은 그대로 나온다."""
+    ev = {
+        "conditions": [
+            {"label": "월봉 종가 > MA20", "ok": True, "actual": "9,500 vs 4,581"},
+            {"ok": True},
+        ]
+    }
+    b = Briefing.from_signal(sig_ev(ev), "1", "amber")
+    body = render.text([b], D)
+    assert "✓ 월봉 종가 > MA20 : 9,500 vs 4,581" in body
+    assert "✓  : " in body
+
+
+def test_price_that_is_not_a_number_falls_back_to_empty() -> None:
+    """상위가 종가를 문자열로 바꿔 보내도 그 줄만 빈다 (R8).
+
+    `int("8,420")`은 예외다 — 방어하지 않으면 그날 메일이 통째로 사라진다.
+    """
+    b = Briefing.from_signal(
+        sig_ev({"price": {"close": "8,420", "change_pct": "n/a"}}), "1", "none"
+    )
+    assert "가비아 [079940]" in render.text([b], D)
+    assert "가비아" in render.html([b], D)
+
+
+def test_conditions_that_are_not_a_list_are_ignored() -> None:
+    b = Briefing.from_signal(sig_ev({"conditions": "정배열"}), "1", "amber")
+    body = render.text([b], D)
+    assert not [ln for ln in body.splitlines() if ln.strip().startswith(("✓", "✗"))]

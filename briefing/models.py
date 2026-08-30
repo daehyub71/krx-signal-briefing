@@ -35,6 +35,22 @@ def dart_link(rcept_no: str) -> str:
     return f"{DART_VIEWER}{rcept_no}"
 
 
+def _as_int(v: Any) -> int:
+    """숫자로 읽히면 int, 아니면 0 (R8). `int("8,420")`은 예외를 던진다."""
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _as_float(v: Any) -> float:
+    """숫자로 읽히면 float, 아니면 0.0 (R8)."""
+    try:
+        return float(v or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 # ── 읽는 쪽 — ksa_signals ────────────────────────────────────────
 
 
@@ -42,8 +58,12 @@ def dart_link(rcept_no: str) -> str:
 class SignalRow:
     """`ksa_signals` 한 행 중 브리핑이 쓰는 것.
 
-    `evidence`는 상위 프로젝트의 공유 계약이다. 키가 없으면 빈 값을 돌려준다 —
-    상위가 키를 바꿔도 메일 전체를 죽이지 않는다 (SPEC R8).
+    `evidence`는 상위 프로젝트의 공유 계약이다 (상위 PLAN §4 — 우리는 세 번째 소비자).
+    **상위가 키를 바꾸거나 값 모양을 바꿔도 메일 전체가 죽으면 안 된다** (SPEC R8):
+    없는 키는 빈 값을 돌려주고, 숫자가 아닌 값은 0으로 떨어진다. 그 줄만 비고 공시는 그대로 나간다.
+
+    실제로 있었던 모양들: `evidence`가 통째로 `null` · 종가가 `"8,420"`(쉼표 낀 문자열) ·
+    `conditions`가 목록이 아닌 문자열 · 조건 항목에 `label`이 없음.
     """
 
     d: date
@@ -53,9 +73,19 @@ class SignalRow:
     evidence: dict[str, Any] = field(default_factory=dict)
 
     @property
+    def ev(self) -> dict[str, Any]:
+        """`evidence`를 딕셔너리로 본다. DB가 `null`을 주는 날이 있다 (R8)."""
+        return self.evidence if isinstance(self.evidence, dict) else {}
+
+    @property
     def conditions(self) -> tuple[tuple[str, bool, str], ...]:
-        """(label, ok, actual) 순서대로. 상위 메일과 같은 순서로 렌더한다."""
-        raw = self.evidence.get("conditions") or []
+        """(label, ok, actual) 순서대로. 상위 메일과 같은 순서로 렌더한다.
+
+        목록이 아니면 빈 튜플. 항목에 키가 없으면 **그 자리만** 빈 문자열이다.
+        """
+        raw = self.ev.get("conditions")
+        if not isinstance(raw, list):
+            return ()
         return tuple(
             (str(c.get("label", "")), bool(c.get("ok", False)), str(c.get("actual", "")))
             for c in raw
@@ -63,19 +93,25 @@ class SignalRow:
         )
 
     @property
+    def _price(self) -> dict[str, Any]:
+        p = self.ev.get("price")
+        return p if isinstance(p, dict) else {}
+
+    @property
     def close(self) -> int:
-        """종가(원). 없으면 0."""
-        return int((self.evidence.get("price") or {}).get("close", 0) or 0)
+        """종가(원). 없거나 숫자로 읽히지 않으면 0 — 그 줄만 빈다 (R8)."""
+        return _as_int(self._price.get("close"))
 
     @property
     def change_pct(self) -> float:
-        """등락률(%). 없으면 0.0."""
-        return float((self.evidence.get("price") or {}).get("change_pct", 0.0) or 0.0)
+        """등락률(%). 없거나 숫자로 읽히지 않으면 0.0 (R8)."""
+        return _as_float(self._price.get("change_pct"))
 
     @property
     def in_progress(self) -> bool:
         """진행 중인 주봉 기준 판정인가 (상위 F8 표기)."""
-        return bool((self.evidence.get("meta") or {}).get("in_progress", False))
+        meta = self.ev.get("meta")
+        return bool(meta.get("in_progress", False)) if isinstance(meta, dict) else False
 
 
 # ── 쓰는 쪽 — ksb_briefings ──────────────────────────────────────
