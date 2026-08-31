@@ -220,8 +220,8 @@
 
 > ⚠ **배포 전 보안 점검 필수** (SPEC N9 · 워크스페이스 CLAUDE.md)
 
-- [ ] `briefing.yml` — `repository_dispatch: types: [alert-completed]` · 예비 cron `05 00 * * 0-4`(`--if-not-briefed`) · `workflow_dispatch(date, dry_run, force)` · `timeout-minutes: 25` · `permissions: contents: read` · `concurrency: briefing`
-- [ ] `main.py --if-not-briefed` — 오늘 `ksb_runs` 있으면 로그 한 줄 + 종료 0 (테스트)
+- [x] `.github/workflows/briefing.yml` — `repository_dispatch: [alert-completed]` · 예비 cron `5 0 * * 0-4`(09:05 KST, `--if-not-briefed`) · `workflow_dispatch(date, dry_run, force)` · `timeout-minutes: 25` · `permissions: contents: read` · `concurrency: briefing`(취소하지 않는다 — 메일이 반쯤 나갈 수 있다) · 입력은 env로 넘긴다(셸 보간 금지) · `python -u`(잘렸을 때 로그가 비지 않게) ~~briefing.yml~~ `repository_dispatch: types: [alert-completed]` · 예비 cron `05 00 * * 0-4`(`--if-not-briefed`) · `workflow_dispatch(date, dry_run, force)` · `timeout-minutes: 25` · `permissions: contents: read` · `concurrency: briefing`
+- [x] `main.py --if-not-briefed` — **실DB 확인** (2026-08-31): `[briefing] 2026-08-31 브리핑이 이미 있다 — 예비 cron no-op` · 종료 0. 단위 테스트 2개 기존 ~~main.py --if-not-briefed~~ — 오늘 `ksb_runs` 있으면 로그 한 줄 + 종료 0 (테스트)
 - [ ] 이 리포 Secrets 8종 등록 (`DART_API_KEY` · `ANTHROPIC_API_KEY` · `SUPABASE_URL` · `SUPABASE_SERVICE_KEY` · `SUPABASE_DATABASE_URL` · `GMAIL_ADDRESS` · `GMAIL_APP_PASSWORD` · `RECIPIENTS`)
 - [ ] Actions `workflow_dispatch --dry-run` 완주 → 실발송 1회
 - [ ] **보안 점검** — 보안 리뷰 · 히스토리 시크릿 스캔(`sk-ant-` · `github_pat_` · DART 40자 hex) · 로그 마스킹(`***`) · 워크플로 권한 · `ksb_*` RLS

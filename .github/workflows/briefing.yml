@@ -1,0 +1,94 @@
+name: briefing
+
+# **상위 알림이 끝나면 즉시 깨어난다** (SPEC D3·F0).
+# `krx-signal-alerts`의 `alert.yml` 마지막 단계가 이 리포로 `repository_dispatch`를 보낸다 —
+# `workflow_run`은 같은 저장소 안에서만 동작해서 쓸 수 없다 (§2-2 ③).
+on:
+  repository_dispatch:
+    types: [alert-completed]
+
+  # 예비 cron. dispatch가 오지 않은 날(상위 워크플로 실패·토큰 만료)에도 브리핑은 나간다.
+  # 09:05 KST = 00:05 UTC. 상위는 08:20 KST에 보내므로 45분 여유가 있다.
+  # `--if-not-briefed`라서 dispatch로 이미 돌았으면 로그 한 줄 남기고 종료 0이다.
+  schedule:
+    - cron: "5 0 * * 0-4"
+
+  workflow_dispatch:
+    inputs:
+      date:
+        description: '기준일 (YYYYMMDD, 비우면 오늘)'
+        required: false
+        type: string
+      dry_run:
+        description: '발송·저장 없이 결과만 출력'
+        required: false
+        type: boolean
+        default: false
+      force:
+        description: '기존 브리핑·요약이 있어도 다시 만든다 (DART·LLM 재호출)'
+        required: false
+        type: boolean
+        default: false
+
+# 최소 권한: 이 워크플로는 리포에 쓰지 않는다 (결과는 Supabase·메일·Vercel로 간다).
+permissions:
+  contents: read
+
+# 예비 cron과 dispatch가 겹칠 수 있다. 겹치면 뒤엣것이 기다린다 —
+# 앞엣것을 죽이면 메일이 반쯤 나간 채 끝날 수 있다.
+concurrency:
+  group: briefing
+  cancel-in-progress: false
+
+jobs:
+  brief:
+    runs-on: ubuntu-latest
+    # 상위 게이트 대기(1분×10회) + MCP 기동 + 종목별 조회 + LLM 1회.
+    # 실측 3~5분. 25분은 게이트가 끝까지 기다리는 최악을 감안한 값이다.
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # MCP 서버는 npx로 띄운다 (SPEC N14 — 버전 고정).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      # 입력을 셸에 직접 보간하지 않는다 — `${{ inputs.date }}`를 run: 안에 그대로 쓰면
+      # 임의 명령 주입 경로가 된다 (상위 프로젝트와 같은 규칙).
+      - name: 브리핑
+        env:
+          RUN_DATE: ${{ inputs.date }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          FORCE: ${{ inputs.force }}
+          IF_NOT_BRIEFED: ${{ github.event_name == 'schedule' }}
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_DATABASE_URL: ${{ secrets.SUPABASE_DATABASE_URL }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          RECIPIENTS: ${{ secrets.RECIPIENTS }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_PROJECT: ${{ secrets.VERCEL_PROJECT }}
+        # `-u`로 돌린다 — 버퍼링되면 시간 초과로 잘렸을 때 로그가 통째로 빈다
+        # (상위 프로젝트에서 실제로 겪었다, 2026-08-31).
+        run: |
+          ARGS=""
+          [ -n "$RUN_DATE" ] && ARGS="$ARGS --date $RUN_DATE"
+          [ "$DRY_RUN" = "true" ] && ARGS="$ARGS --dry-run"
+          [ "$FORCE" = "true" ] && ARGS="$ARGS --force"
+          [ "$IF_NOT_BRIEFED" = "true" ] && ARGS="$ARGS --if-not-briefed"
+          python -u -m briefing.main $ARGS
