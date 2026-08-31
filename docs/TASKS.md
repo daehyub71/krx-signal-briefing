@@ -16,10 +16,10 @@
 | **M1c 뉴스** (v2.0) | `██████████` | 100% | 8/8 | ✅ 2026-08-29 |
 | M2 본문·저장·발송 | `██████████` | 100% | 10/10 | ✅ 2026-08-29 |
 | M3 Claude 요약 | `██████████` | 100% | 8/8 | ✅ 2026-08-30 |
-| M4 자동화·배포 | `████████░░` | 77% | 10/13 | 🔄 |
+| M4 자동화·배포 | `█████████░` | 85% | 11/13 | 🔄 |
 | M5 마무리 | `░░░░░░░░░░` | 0% | 0/5 | 🔜 |
 | **M6 신호 검증 (v3.0)** | `█████████░` | 90% | 28/31 | 🔄 |
-| **전체** | `█████████░` | **90%** | **96/107** | 🔄 M4·M6 |
+| **전체** | `█████████░` | **91%** | **97/107** | 🔄 M4·M6 |
 
 범례: 🔜 대기 · 🔄 진행중 · ✅완료일
 
@@ -230,7 +230,13 @@
 - [x] `main.py --if-not-briefed` — **실DB 확인** (2026-08-31): `[briefing] 2026-08-31 브리핑이 이미 있다 — 예비 cron no-op` · 종료 0. 단위 테스트 2개 기존
 - [x] **이 리포 Secrets 12종 등록** (2026-08-31) — 위 8종 + `NAVER_CLIENT_ID`·`NAVER_CLIENT_SECRET`(F11) + `VERCEL_TOKEN`·`VERCEL_PROJECT`(F20). 값은 출력하지 않고 `.env`에서 직접 넣었다
 - [x] **Actions `workflow_dispatch` 완주 → 실발송** (2026-08-31, run `33391344626`) — **1분 19초 · success**. 게이트 ready · 시세 15/15 · **수급 15/15** · 분석 7/7 · **벨셀 배포** · 저장 15건 · 2명 발송 · `status=ok`. MCP(npx)·Secrets 12종·Supabase·Gmail·Vercel이 CI에서 전부 동작
-- [ ] **보안 점검** — 보안 리뷰 · 히스토리 시크릿 스캔(`sk-ant-` · `github_pat_` · DART 40자 hex) · 로그 마스킹(`***`) · 워크플로 권한 · `ksb_*` RLS
+- [x] **보안 점검** (2026-08-31) — 아래 6항목. **발견 1건: `ksb_*` anon 읽기 → 닫음** (`8e3266f`)
+  - **히스토리 시크릿 스캔** ✅ — 37커밋 265 blob 전수. `.env`의 **실제 값 11종**을 히스토리와 직접 대조(패턴 매칭이 아니라 값 대조) → 전부 없음. `sk-ant-`·`github_pat_`·`ghp_`·JWT·`postgres://user:pw@` 패턴 hit 0. `.env`·`.tokens.json` 추적 안 됨
+  - **로그 마스킹** ✅ — 실제 Actions 로그 947줄에 `.env` 값 11종 중 **하나도 없음**(`***` 8회). `VERCEL_PROJECT`가 가려져 배포 URL도 `https://***-…vercel.app`으로 찍힌다
+  - **DART 키 노출(N7)** ✅ — `dart._get()`이 모든 예외 경로에서 `mask(…, key)`를 거치고, 메시지에 URL이 아니라 `path`만 넣는다
+  - **워크플로 권한** ✅ — 이 리포 2개 + 상위 3개 **전부 `permissions: contents: read`**
+  - **HTML 주입** ✅ — 외부 문자열(뉴스 제목·요약·공시 제목·LLM 서술)이 HTML로 가는 경로 전수 확인. `page.py` 24곳 `escape()`, `render.py` `_excerpt()`가 양쪽 분기 모두 escape. 의심 8건은 전부 코드가 만든 내부 문자열
+  - **`ksb_*` RLS** ⚠→✅ — **`for select to anon, authenticated using (true)` 정책이 걸려 있었다.** 공개된 anon 키(상위 `krx-stock-charts` 웹 번들, SPEC R6)로 `ksb_briefings` **15행이 통째로 읽혔다** — 티커·종목명·공시 목록·등급·판정·근거 서술. 전문 페이지를 Vercel SSO로 잠근 이유(R7 v3.1)가 무력화된 상태였다. 이 프로젝트엔 웹 층이 없고 전문 페이지는 파이프라인이 만드는 정적 HTML이라 anon이 읽을 이유가 없다 → **정책 2개 제거**(RLS는 유지, service_role은 우회). **실증**: anon `[]`·`content-range */0` / service_role 15·21행 정상. 회귀는 `tests/test_schema.py`가 막는다
 - [x] **PAT 발급 절차를 `docs/TOKENS.md` §2에 작성** — 최소 권한·확인 방법·실패 응답(404/403)까지
 - [x] **[상위 리포] PAT 발급·등록** (2026-08-31) — fine-grained · `krx-signal-briefing` 1개 · Contents(code) Read and write · Metadata Read · user permissions 없음. **만료일 없음**(사용자 선택) — 안 쓰게 되면 <https://github.com/settings/tokens?type=beta>에서 지운다
 - [x] **[상위 리포] `alert.yml` dispatch 단계 추가** (2026-08-31, 상위 `0400265`) — `if: success() && !inputs.dry_run` · `continue-on-error`. **`if: always()`가 아니다**: 스크리닝이 실패한 날은 `ksa_signals`가 비어 깨워도 할 일이 없고, 하위 예비 cron이 `ksa_runs`를 보고 판단한다. 실패해도 상위를 실패시키지 않는다 — 알림은 이미 나갔다
@@ -311,6 +317,8 @@
 | 5 | CI `mcp` 잡이 두 번 실패 (2026-08-29) | ① Secrets에 `DART_API_KEY`가 없어 dart가 안 뜸 ② `--require`의 **기본값이 `["dart"]`**라 인자를 안 줘도 요구했다 | 키가 있을 때만 `--require dart`를 붙이도록 워크플로 분기 + `--require` 기본값을 빈 목록으로. **키 없음은 CI 실패 사유가 아니다** — 그 층이 없는 것뿐이다(D15) |
 | 3 | MCP 프로브가 `tool.inputSchema`·`result.isError`에서 `AttributeError` (2026-08-29) | **MCP 파이썬 SDK 2.x는 snake_case** (`input_schema`·`is_error`). 1.x 문서·예제와 다르다 | 2.x 필드명 사용. `mcpc.py`에 계약 테스트로 고정 |
 | 4 | korea-stock-mcp `get_stock_trade_info` 인자 오류 | README는 `isuSrtCd/fromDate/toDate`인데 실제 스키마는 `basDdList/market/codeList` | 실스키마 기준. `mcpc.list_tools()`로 기동 시 스키마를 확인해 로그 |
+| 6 | **공개 anon 키로 `ksb_briefings` 15행이 통째로 읽혔다** (2026-08-31 보안 점검) | 스키마에 `create policy … for select to anon, authenticated using (true)`가 있었다 — "뒤에 웹이 읽을지 모르니"로 열어 둔 것. 웹 층은 끝내 만들지 않았고, 그 anon 키는 상위 `krx-stock-charts` 웹 번들에 실려 공개돼 있다(SPEC R6). 전문 페이지를 SSO로 잠근 의미(R7 v3.1)가 사라진 상태 | 정책 2개 제거, RLS는 유지(service_role은 우회). 실증: anon `[]`·`*/0` / service_role 15·21행. `tests/test_schema.py`가 `to anon` 정책 부활을 막는다 (`8e3266f`) |
+| 7 | **하루치 44건이 저장되지 않았다** — 메일·전문 페이지는 나갔는데 `ksb_briefings`는 08/26 15행 그대로 (2026-08-31 run `33395198128`) | 44행을 **한 문장으로** upsert → Supabase가 `57014 canceling statement due to statement timeout`. 한 행이 크다(공시 목록 + 뉴스 5건 + 근거 서술). `persist`는 설계상 오류를 삼키므로 `[persist] 저장 실패(무시)` 한 줄만 남고 `status=ok`로 끝났다. 재실행하면 DART·LLM을 통째로 다시 부른다 | `BRIEFING_UPSERT_CHUNK = 10`씩 나눠 보낸다. 멱등은 그대로(같은 PK 덮어쓰기)이고, 중간에 끊겨도 앞 청크는 남는다. 실DB 검증: 44행 **1.0초** (`77e3e0f`) |
 
 ### 미리 알고 있는 함정 (상위·선행 프로젝트에서 확인됨)
 

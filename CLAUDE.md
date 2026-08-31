@@ -110,6 +110,8 @@ pytest tests/ -v    # 3. 테스트
 - **티커는 숫자가 아니다** — `0126Z0`. `corpCode.xml`의 `stock_code`도 문자열로 비교.
 - **메일 한 통은 102,400 bytes를 넘으면 Gmail이 잘라낸다** (N15) — 잘리면 꼬리의 한계 문구까지 사라진다. 전부 inline 스타일이던 첫 판이 149,971 bytes로 실제로 잘렸다. `render.html()`이 예산을 넘으면 압축 카드부터 접는다. 본문을 늘렸으면 `test_real_sized_mail_fits_in_a_gmail_message`를 본다.
 - **`create table if not exists`는 마이그레이션이 아니다.**
+- **`ksb_*`에 `to anon` 정책을 만들지 않는다** — 이 프로젝트엔 웹 층이 없고 전문 페이지는 파이프라인이 만드는 정적 HTML이다. 열어 두었더니 공개된 anon 키(상위 웹 번들, R6)로 브리핑 15행이 통째로 읽혔다 (2026-08-31). 전문 페이지를 SSO로 잠근 이유(R7 v3.1)가 그 구멍으로 사라진다. `tests/test_schema.py`가 막는다.
+- **저장은 나눠 보낸다** — 44행을 한 문장으로 upsert했더니 Supabase가 `57014` statement timeout으로 끊었고, `persist`가 오류를 삼켜 **메일은 나갔는데 DB는 비었다** (2026-08-31). `BRIEFING_UPSERT_CHUNK`를 늘리기 전에 실DB로 재 본다.
 - **pip은 이 디렉토리에서** — 워크스페이스 루트 오설치 사례 있음.
 - **`ksa_*`·`ksc_*`에 쓰지 않는다** — 상위 프로젝트 소유다.
 
