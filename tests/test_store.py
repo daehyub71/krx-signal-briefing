@@ -290,3 +290,78 @@ def test_fetch_flows_30d_returns_nothing_for_a_ticker_with_no_rows() -> None:
     """상위가 아직 안 채웠으면 그 종목은 빠진다 — 호출자가 '생략'으로 표기한다 (D15)."""
     got = store.fetch_flows_30d(cast("Any", FlowCursor([])), ["413630"])
     assert got == {}
+
+
+# ── upsert_briefings 청크 분할 ──────────────────────────────────
+#
+# 44건을 한 문장으로 보냈더니 Supabase가 끊었다 (2026-08-31 실측):
+#   [persist] 저장 실패(무시): {'code': '57014',
+#     'message': 'canceling statement due to statement timeout'}
+# 메일과 전문 페이지는 나갔는데 DB에는 아무것도 안 남아, 재실행이 DART·LLM을
+# 통째로 다시 부르게 됐다. 한 행이 크다 — 공시 목록 + 뉴스 5건 + 근거 서술 2,000자.
+
+
+class FakeTable:
+    """`upsert(rows).execute()` 호출을 기록하는 스텁."""
+
+    def __init__(self, log: list[list[dict[str, Any]]]) -> None:
+        self._log = log
+        self._pending: list[dict[str, Any]] = []
+
+    def upsert(self, rows: list[dict[str, Any]]) -> FakeTable:
+        self._pending = rows
+        return self
+
+    def execute(self) -> None:
+        self._log.append(self._pending)
+
+
+class FakeClient:
+    def __init__(self) -> None:
+        self.calls: list[list[dict[str, Any]]] = []
+
+    def table(self, name: str) -> FakeTable:
+        assert name == "ksb_briefings"
+        return FakeTable(self.calls)
+
+
+def _briefings(n: int) -> list[Briefing]:
+    return [
+        Briefing(
+            d=date(2026, 8, 28),
+            strategy="mtf",
+            ticker=f"{100000 + i:06d}",
+            name=f"종목{i}",
+            corp_code=f"{i:08d}",
+            level="none",
+        )
+        for i in range(n)
+    ]
+
+
+def test_upsert_briefings_splits_a_large_batch() -> None:
+    """44건이 한 문장으로 나가지 않는다 — 청크마다 한 번씩."""
+    client = FakeClient()
+    assert store.upsert_briefings(cast("Any", client), _briefings(44)) == 44
+    assert len(client.calls) > 1
+    assert all(len(chunk) <= store.BRIEFING_UPSERT_CHUNK for chunk in client.calls)
+
+
+def test_upsert_briefings_sends_every_row_once() -> None:
+    """나눠 보내도 빠지거나 겹치는 행이 없다."""
+    client = FakeClient()
+    store.upsert_briefings(cast("Any", client), _briefings(44))
+    sent = [row["ticker"] for chunk in client.calls for row in chunk]
+    assert sorted(sent) == sorted(b.ticker for b in _briefings(44))
+
+
+def test_upsert_briefings_sends_a_small_batch_in_one_call() -> None:
+    client = FakeClient()
+    assert store.upsert_briefings(cast("Any", client), _briefings(3)) == 3
+    assert len(client.calls) == 1
+
+
+def test_upsert_briefings_with_nothing_does_not_call() -> None:
+    client = FakeClient()
+    assert store.upsert_briefings(cast("Any", client), []) == 0
+    assert client.calls == []

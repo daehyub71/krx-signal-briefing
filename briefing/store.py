@@ -360,12 +360,22 @@ def fetch_briefings(c: psycopg.Connection[Any], d: date) -> dict[str, Briefing]:
     return out
 
 
+# 한 문장에 담는 최대 행 수. 한 행이 크다 — 공시 목록 + 뉴스 5건 + 근거 서술 2,000자.
+# 44건을 한 번에 보냈더니 Supabase가 statement timeout(57014)으로 끊었고,
+# 메일·전문 페이지는 나갔는데 DB에는 아무것도 안 남았다 (2026-08-31 실측).
+# 15건까지는 통과하던 값이라 그 아래로 잡는다.
+BRIEFING_UPSERT_CHUNK = 10
+
+
 def upsert_briefings(client: Client, briefings: Sequence[Briefing]) -> int:
-    """브리핑을 저장한다 (F9). PK 기준 upsert라 재실행해도 같은 결과다 (N6)."""
-    if not briefings:
-        return 0
+    """브리핑을 저장한다 (F9). PK 기준 upsert라 재실행해도 같은 결과다 (N6).
+
+    `BRIEFING_UPSERT_CHUNK`씩 나눠 보낸다. 나눠도 멱등은 그대로다 —
+    PK가 같으면 덮어쓰므로 중간에 끊겨도 앞부분은 남는다.
+    """
     rows = [b.to_row() for b in briefings]
-    client.table("ksb_briefings").upsert(rows).execute()
+    for i in range(0, len(rows), BRIEFING_UPSERT_CHUNK):
+        client.table("ksb_briefings").upsert(rows[i : i + BRIEFING_UPSERT_CHUNK]).execute()
     return len(rows)
 
 
