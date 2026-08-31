@@ -73,18 +73,26 @@ python -m briefing.main --date 20260827 --force | grep publish
 ### 발급 — fine-grained PAT
 
 1. <https://github.com/settings/personal-access-tokens/new>
-2. 아래대로 **최소 권한**으로 만든다
+2. 위쪽을 아래대로 채운다
 
    | 항목 | 값 |
    |------|-----|
    | Token name | `briefing-dispatch` |
-   | Expiration | 1년 (만료일을 달력에 적어 둔다 — 지나면 조용히 안 깨어난다) |
    | Resource owner | `daehyub71` |
-   | Repository access | **Only select repositories** → `krx-signal-briefing` **하나만** |
-   | Permissions → Repository → **Contents** | **Read and write** |
+   | Expiration | 1년 권장. 무기한도 되지만 유출돼도 스스로 닫히지 않는다 (아래 참고) |
+   | Repository access | **Only select repositories** → `daehyub71/krx-signal-briefing` **하나만** |
 
-   `Contents: write`가 `repository_dispatch`를 보내는 데 필요한 권한이다.
-   다른 권한은 **주지 않는다.**
+3. **Permissions** — 화면이 2026년에 바뀌었다. 예전처럼 긴 드롭다운 목록이 아니라
+   `Repositories 0 / Account 0` 탭과 **`+ Add permissions`** 버튼이 있는 빈 상태로 시작한다.
+
+   1. **`+ Add permissions`** 클릭
+   2. 검색창에 **`Contents`**
+   3. **Contents** 선택 → 옆 드롭다운을 **`Read and write`**
+   4. 추가되면 `Repositories 1`(`Metadata: Read-only`가 자동으로 붙어 `2`일 수도 있다)로 바뀐다
+   5. **`Account` 탭은 손대지 않는다** — `0`인 채로 둔다
+
+   `Contents: Read and write`가 `repository_dispatch`를 보내는 데 필요한 **유일한** 권한이다.
+   **`Repositories 0`인 채로 만들면 dispatch가 403으로 실패한다.**
 
 3. **Generate token** → 한 번만 보이니 그 자리에서 복사
 
@@ -120,4 +128,6 @@ gh run watch --exit-status
 - **`.env`는 절대 커밋하지 않는다.** `.gitignore` 대상이며, 이 리포는 public이다
 - 토큰을 셸에 그대로 치면 히스토리에 남는다 — 위처럼 `printf %s '…' | gh secret set …`을 쓴다
 - `gh secret set`의 값은 로그에 마스킹되지만, **터미널 스크롤백에는 남는다**
-- 만료일을 `docs/TASKS.md` 「미해소 이슈」에 적어 둔다 — 지나면 **조용히** 안 돈다
+- **만료일을 정했다면** `docs/TASKS.md` 「미해소 이슈」에 적어 둔다 — 지나면 **조용히** 안 돈다.
+  무기한으로 만들었다면 적을 것은 없지만, 대신 이 토큰이 살아 있다는 사실을 잊기 쉽다 —
+  쓰지 않게 되면 <https://github.com/settings/tokens?type=beta>에서 지운다
