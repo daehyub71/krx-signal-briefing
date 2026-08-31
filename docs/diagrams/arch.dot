@@ -1,17 +1,17 @@
 digraph arch {
   graph [fontname="Apple SD Gothic Neo", fontsize=13, rankdir=TB, nodesep=0.35, ranksep=0.55, pad=0.4, bgcolor="white", compound=true,
-         label="krx-signal-briefing — 시스템 개요 v2.0 · MCP 3종 (PLAN §1·§1-3 · SPEC §2-3)", labelloc=t, labeljust=l];
+         label="krx-signal-briefing — 시스템 개요 v3.1 · MCP 2종 (PLAN §1·§1-3 · SPEC §2-3·§2-5)", labelloc=t, labeljust=l];
   node  [fontname="Apple SD Gothic Neo", fontsize=12, shape=box, style="rounded,filled", fillcolor="#F4F6FA", color="#3D465F", penwidth=1.2, margin="0.18,0.1"];
   edge  [fontname="Apple SD Gothic Neo", fontsize=10, color="#3D465F", arrowsize=0.8];
 
   subgraph cluster_up {
     label=<<b>krx-signal-alerts</b>  (상위)<br/><font point-size="10">평일 08:20 KST · alert.yml · 마지막 단계에 dispatch만 추가</font>>; style="rounded,filled"; fillcolor="#FAFBFD"; color="#C5CAD6";
-    ksc   [label=<ksc_bars · ksc_tickers<br/><font point-size="10">시세 (krx-stock-charts 소유)</font>>, fillcolor="#EEF0F5"];
+    ksc   [label=<ksc_bars · ksc_tickers · <b>ksc_investor_flows</b><br/><font point-size="10">시세 + <b>기관/외국인 순매수</b> (krx-stock-charts 소유)<br/>수급은 상위가 pykrx로 하루 10회에 모은다 (D22)</font>>, fillcolor="#EEF0F5"];
     alert [label=<스크리닝 배치<br/><font point-size="10">전략 5개 · LangGraph · LLM 없음</font>>];
     mail1 [label=<📧 신호 메일 (1통째)<br/><font point-size="10">전 신호 + 조건 근거값</font>>, fillcolor="#FFFFFF"];
     kakao [label=<💬 카카오톡<br/><font point-size="10">상위 10건</font>>, fillcolor="#FFFFFF"];
     ksc -> alert [label=" SELECT"];
-    dispatch [label=<repository_dispatch<br/><font point-size="10">alert-completed · if: always()<br/>PAT: 대상 리포 1개 · Contents write</font>>, fillcolor="#FFF4E0", color="#E0B458"];
+    dispatch [label=<repository_dispatch<br/><font point-size="10">alert-completed · if: success() &amp;&amp; !dry_run<br/>continue-on-error — 실패해도 상위를 실패시키지 않는다<br/>PAT: 대상 리포 1개 · Contents write</font>>, fillcolor="#FFF4E0", color="#E0B458"];
     alert -> mail1; alert -> kakao; alert -> dispatch [label=" 마지막 단계"];
   }
 
@@ -19,49 +19,49 @@ digraph arch {
     label=<<b>Supabase</b>  (같은 프로젝트 · 접두어로 소유 구분)>; style="rounded,filled"; fillcolor="#FAFBFD"; color="#C5CAD6";
     ksa [label=<<b>ksa_signals · ksa_runs</b><br/><font point-size="10">상위 소유 · 여기서는 SELECT만</font>>, fillcolor="#EEF0F5"];
     { rank=same; ksa; ksb; }
-    ksb [label=<<b>ksb_briefings · ksb_runs</b><br/><font point-size="10">이 프로젝트 소유 · RLS 읽기 공개 / 쓰기 service_role</font>>, fillcolor="#EAF7EC"];
+    ksb [label=<<b>ksb_briefings · ksb_runs</b><br/><font point-size="10">이 프로젝트 소유 · RLS 정책 없음 — <b>service_role 전용</b><br/>공개 anon 키가 읽던 구멍은 2026-08-31에 닫았다</font>>, fillcolor="#EAF7EC"];
   }
 
   subgraph cluster_me {
     label=<<b>krx-signal-briefing</b>  (이 프로젝트)<br/><font point-size="10">briefing.yml · LangGraph · Python 3.11 + Node 20.19 · 주 진입: dispatch / 예비: cron 09:05</font>>; style="rounded,filled"; fillcolor="#FFFBF2"; color="#E0B458";
     gate  [label=<① 게이트<br/><font point-size="10">ksa_runs 오늘 행? 없으면 1분×10회</font>>, fillcolor="#FFF4E0"];
-    fetch [label=<② 공시 조회·판정<br/><font point-size="10">search_disclosures 1회 → 🔴/🟡 규칙표(F5)<br/>+ 보조: anomaly 점수 · insider 매도 군집(F4b) · 시총·거래대금(F12)</font>>, fillcolor="#FFF4E0"];
-    news  [label=<③ 뉴스 (F11)<br/><font point-size="10">등급 none인 종목만 · 최대 5건<br/>실패 시 생략</font>>, fillcolor="#FFF4E0"];
-    summ  [label=<④ 요약<br/><font point-size="10">Claude Opus 5 · 하루 1회 일괄<br/>실패해도 메일은 간다</font>>, fillcolor="#E8F0FB"];
-    mail2 [label=<📧 브리핑 메일 (2통째)<br/><font point-size="10">조건 5줄 + 등급 · 공시 · 원문 링크<br/>+ 보조 신호 · 뉴스 · 요약</font>>, fillcolor="#FFFFFF"];
-    gate -> fetch -> news -> summ -> mail2;
+    flows [label=<② 수급 (F17)<br/><font point-size="10">ksc_investor_flows SQL 1회 — 기관·외국인 <b>30일</b><br/>외부 호출도 새 키도 없다</font>>, fillcolor="#FFF4E0"];
+    fetch [label=<③ 공시 조회·판정<br/><font point-size="10">search_disclosures 1회 → 🔴/🟡 규칙표(F5) · 정형 공시는 접는다(F16)<br/>걸린 공시는 <b>본문</b>까지 읽는다 — 오버행·자금용도 (F15)<br/>+ 보조: anomaly 점수 · insider 매도 군집(F4b)</font>>, fillcolor="#FFF4E0"];
+    news  [label=<④ 뉴스 (F11 v2)<br/><font point-size="10"><b>전 종목</b> · 종목명 + 관련도순 · 제목 필터<br/>최대 5건 · 실패 시 생략</font>>, fillcolor="#FFF4E0"];
+    summ  [label=<⑤ 판정·근거 서술<br/><font point-size="10"><b>판정·점수는 코드가</b> 낸다 — verdict.judge() 순수 함수 (F18)<br/>Claude Opus 5가 그것을 <b>설명</b>한다 · 종목당 2,000자 (F19)<br/>LLM이 죽어도 판정은 나간다</font>>, fillcolor="#E8F0FB"];
+    page  [label=<⑥ 전문 페이지 (F20)<br/><font point-size="10">정적 HTML → Vercel · <b>SSO 보호 유지</b> (R7)<br/>실패하면 메일만 링크 없이 간다</font>>, fillcolor="#FFF4E0"];
+    mail2 [label=<📧 브리핑 메일 (2통째)<br/><font point-size="10"><b>간략하게</b> — 판정·점수·근거 발췌 + 전문 링크 (v3.1)<br/>Gmail 절단 한계 102,400 bytes 안에서 접는다 (N15)</font>>, fillcolor="#FFFFFF"];
+    gate -> flows -> fetch -> news -> summ -> page -> mail2;
     // 상자 안은 위→아래 흐름 (rank=same 제거)
   }
 
   subgraph cluster_mcp {
-    label=<<b>MCP 서버</b>  (남이 만든 것 · npx stdio · 버전 고정 · 데이터 소스일 뿐, 판단 주체가 아니다 — N14)>; style="rounded,filled"; fillcolor="#F3F0FA"; color="#9C8AD1";
+    label=<<b>MCP 서버</b>  (남이 만든 것 · npx stdio · 버전 고정 · 데이터 소스일 뿐, 판단 주체가 아니다 — N14)<br/><font point-size="10">korea-stock-mcp는 배치에서 뺐다 (D14 v2) — 시총은 상위가 채우고, 순매수 도구는 애초에 없다</font>>; style="rounded,filled"; fillcolor="#F3F0FA"; color="#9C8AD1";
     kdart [label=<<b>korean-dart-mcp</b><br/><font point-size="10">search_disclosures · disclosure_anomaly · insider_signal<br/>Node 20.19+ · DART_API_KEY</font>>, fillcolor="#FFFFFF"];
     knav  [label=<<b>naver-search-mcp</b><br/><font point-size="10">search_news · NCP API HUB 키</font>>, fillcolor="#FFFFFF"];
-    kstk  [label=<<b>korea-stock-mcp</b><br/><font point-size="10">get_stock_trade_info → 시총·상장주식수·거래대금<br/>KRX_API_KEY (순매수 도구는 없음)</font>>, fillcolor="#FFFFFF"];
-    { rank=same; kdart; knav; kstk; }
+    { rank=same; kdart; knav; }
   }
 
   subgraph cluster_ext {
     label=<<b>외부 API</b>>; style="rounded,filled"; fillcolor="#FAFBFD"; color="#C5CAD6";
     dart [label=<OpenDART<br/><font point-size="10">corpCode.xml 1회(우리 corp.py) · list.json(MCP 경유 또는 폴백)<br/>한도 20,000/일</font>>];
     naver [label=<네이버 검색 API<br/><font point-size="10">뉴스</font>>];
-    krx   [label=<KRX OPEN API<br/><font point-size="10">일별 매매정보</font>>];
+    vercel [label=<Vercel API<br/><font point-size="10">v13/deployments · 전문 페이지 (SSO 보호)</font>>];
     claude [label=<Anthropic API<br/><font point-size="10">claude-opus-5 · 공식 SDK</font>>];
-    { rank=same; dart; naver; krx; claude; }
+    { rank=same; dart; naver; vercel; claude; }
   }
 
   alert -> ksa [label=" upsert · run 기록", color="#626D8A"];
   ksa -> gate  [label=" SELECT (게이트·신호·evidence)", color="#1F63A8", fontcolor="#1F63A8"];
+  ksc -> flows [label=" SELECT (30일 수급·시총)", color="#1F63A8", fontcolor="#1F63A8"];
   dispatch -> gate [label=" 이벤트 → 수십 초 안에 시작", color="#C9283E", fontcolor="#C9283E", penwidth=1.6];
   fetch -> kdart [dir=both, label=" MCP stdio (mcpc.py)", color="#6C4FC4", fontcolor="#6C4FC4"];
   fetch -> dart  [dir=both, label=" 폴백: REST 직접 (D15)", style=dashed, color="#626D8A", fontcolor="#626D8A"];
   news  -> knav  [dir=both, label=" MCP stdio", color="#6C4FC4", fontcolor="#6C4FC4"];
   kdart -> dart  [dir=both, label=" HTTPS", style=dashed];
   knav  -> naver [dir=both, label=" HTTPS", style=dashed];
-  fetch -> kstk  [dir=both, label=" MCP stdio", color="#6C4FC4", fontcolor="#6C4FC4"];
-  kstk  -> krx   [dir=both, label=" HTTPS", style=dashed];
+  page  -> vercel [dir=both, label=" HTTPS", style=dashed];
   summ  -> claude [dir=both, label=" HTTPS", style=dashed];
-  summ -> ksb  [label=" upsert (멱등)", color="#2E7D32", fontcolor="#2E7D32"];
-  mail2 -> ksb [style=invis];
+  page -> ksb  [label=" upsert (멱등) · 발송 전", color="#2E7D32", fontcolor="#2E7D32"];
 
 }

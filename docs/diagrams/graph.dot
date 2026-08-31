@@ -1,6 +1,6 @@
 digraph briefing {
   graph [fontname="Apple SD Gothic Neo", fontsize=13, rankdir=TB, nodesep=0.45, ranksep=0.5, pad=0.4, bgcolor="white",
-         label="krx-signal-briefing — LangGraph 그래프 v2.0 (PLAN §1-1·§1-3 · SPEC D10·D12~D15)", labelloc=t, labeljust=l];
+         label="krx-signal-briefing — LangGraph 그래프 v3.1 (PLAN §1-1·§1-3 · SPEC D10·D12~D16 · F17~F20)", labelloc=t, labeljust=l];
   node  [fontname="Apple SD Gothic Neo", fontsize=12, shape=box, style="rounded,filled", fillcolor="#F4F6FA", color="#3D465F", penwidth=1.2, margin="0.18,0.08"];
   edge  [fontname="Apple SD Gothic Neo", fontsize=10, color="#3D465F", arrowsize=0.8];
 
@@ -15,16 +15,20 @@ digraph briefing {
   // 입력 (I/O)
   load_signals [label=<<b>load_signals</b><br/><font point-size="10">F2 · ksa_signals + 기존 ksb_briefings(멱등)</font>>, fillcolor="#FFF4E0"];
   load_corps   [label=<<b>load_corps</b><br/><font point-size="10">F3 · corpCode.xml 1회 → {ticker: corp_code}</font>>, fillcolor="#FFF4E0"];
+  load_market  [label=<<b>load_market</b><br/><font point-size="10">F12·F17 · SQL 1회 — 시총·거래대금 + <b>기관/외국인 30일 수급</b><br/>상위가 채운 ksc_* 를 읽기만 한다 · 실패해도 raise 안 함</font>>, fillcolor="#FFF4E0"];
 
   // fan-out
-  fetch_one    [label=<<b>fetch_one × N</b>  <font point-size="10">(종목당 Send · 20줄 · raise 안 함)</font><br/><font point-size="10">① 공시  korean-dart-mcp search_disclosures 30일 → 실패 시 REST 폴백(D15)<br/>② 판정  flags.classify — 규칙표(F5) · 자회사·리츠 강등<br/>③ 보조  disclosure_anomaly 점수 · insider_signal 매도 군집 · korea-stock-mcp 시총·거래대금 → 실패 시 생략<br/>④ 뉴스  등급 none만 naver-search-mcp search_news 5건 → 실패 시 생략</font>>, fillcolor="#FFF4E0", peripheries=2];
+  fetch_one    [label=<<b>fetch_one × N</b>  <font point-size="10">(종목당 Send · 20줄 · raise 안 함)</font><br/><font point-size="10">① 공시  korean-dart-mcp search_disclosures 30일 → 실패 시 REST 폴백(D15)<br/>② 판정  flags.classify — 규칙표(F5) · 자회사·리츠 강등<br/>③ 보조  disclosure_anomaly 점수 · insider_signal 매도 군집 · korea-stock-mcp 시총·거래대금 → 실패 시 생략<br/>④ 뉴스  <b>전 종목</b> naver-search-mcp search_news 5건 · 관련도순 · 제목 필터 → 실패 시 생략</font>>, fillcolor="#FFF4E0", peripheries=2];
   join         [shape=point, width=0.12, fillcolor="#3D465F", color="#3D465F"];
 
   // LLM
-  summarize    [label=<<b>summarize</b><br/><font point-size="10">F14 · Claude Opus 5 1회 일괄 · 예외 불투과<br/>입력 = 공시 제목·등급 + 보조 신호 + 뉴스 제목 (도구 없음, N14)<br/>실패·키 없음 → summary_error</font>>, fillcolor="#E8F0FB"];
+  analyze      [label=<<b>analyze</b><br/><font point-size="10">① <b>verdict.judge() — 순수 함수</b>가 정합/불일치/무관 판정과 점수를 낸다 (F18)<br/>② Claude Opus 5 1회 일괄이 그 판정을 <b>설명</b>한다 — 종목당 2,000자 (F19)<br/>입력 = 공시 제목·본문 + 뉴스 + 30일 수급 + 판정 (도구 없음, N14)<br/><b>LLM이 죽어도 판정·점수는 나간다</b> · 실패·키 없음 → summary_error</font>>, fillcolor="#E8F0FB"];
+
+  // 출력 (I/O) — render보다 먼저 돌아야 메일이 링크를 담는다
+  publish      [label=<<b>publish</b><br/><font point-size="10">F20 · 전문 페이지 → Vercel (SSO 보호 유지, R7)<br/>실패하면 page_url이 비고 메일은 링크 없이 간다</font>>, fillcolor="#FFF4E0"];
 
   // 순수
-  render       [label=<<b>render</b><br/><font point-size="10">F7·F8 · 순수 함수 (subject · text · html)</font>>, fillcolor="#EAF7EC"];
+  render       [label=<<b>render</b><br/><font point-size="10">F7·F8 · 순수 함수 (subject · text · html)<br/>메일은 간략하게 — 전문은 페이지로 (v3.1)</font>>, fillcolor="#EAF7EC"];
 
   // 출력 (I/O)
   persist      [label=<<b>persist</b><br/><font point-size="10">F9 · ksb_briefings upsert (dry-run 시 생략)</font>>, fillcolor="#FFF4E0"];
@@ -41,11 +45,13 @@ digraph briefing {
   route_gate -> load_signals [label="  ready", color="#1F63A8", fontcolor="#1F63A8"];
 
   load_signals -> load_corps;
-  load_corps -> fetch_one    [label="  fan-out · Send() × N", style=dashed];
-  load_corps -> summarize    [label="  신호 0건", style=dotted, color="#626D8A", fontcolor="#626D8A"];
+  load_corps -> load_market;
+  load_market -> fetch_one   [label="  fan-out · Send() × N", style=dashed];
+  load_market -> analyze     [label="  신호 0건", style=dotted, color="#626D8A", fontcolor="#626D8A"];
   fetch_one -> join          [label="  reducer: briefings += (operator.add)", style=dashed, arrowhead=none];
-  join -> summarize;
-  summarize -> render;
+  join -> analyze;
+  analyze -> publish;
+  publish -> render;
   render -> persist;
   persist -> send_email;
   send_email -> record_run;
@@ -54,7 +60,7 @@ digraph briefing {
 
   mcp_note [shape=note, fillcolor="#F3F0FA", color="#9C8AD1", fontsize=10,
             label="MCP 세션은 그래프 밖(main)에서 배치당 1회 열고 닫는다 — mcpc.py\nfan-out N개가 세션 하나를 공유(락). 그래프는 MCP를 모른다."];
-  load_corps -> mcp_note [style=invis];
+  load_market -> mcp_note [style=invis];
 
   // 범례
   subgraph cluster_legend {
