@@ -209,7 +209,10 @@
 - [x] **Vercel 실배포 확인** (2026-08-31) — 프로젝트 `krx-signal-briefing` 생성(첫 배포 때 자동), `.env`·Secrets 등록, 전체 흐름 완주: `[publish] https://krx-signal-briefing-daehyub71s-projects.vercel.app/20260826.html` → 메일에 링크 포함 → 발송
 - [x] **배포 보호(SSO)를 켠 채 둔다** (사용자 결정) — 익명 접근은 벨셀 인증 화면으로 막히고 내용이 보이지 않는다. R7 v3.1로 정정: **공개 URL이 아니다**. F20b 면책 문구는 보호가 풀리는 날을 대비한 이중 방어로 유지
 - [x] **리포 Secrets 12개 등록** — 값은 출력하지 않고 `.env`에서 직접 넣었다
-- [ ] `VERCEL_TOKEN`이 **CLI 세션 토큰**이다 — `vercel logout` 하면 무효가 된다. 대시보드에서 발급한 토큰으로 바꾸는 편이 안전하다
+- [x] **`docs/TOKENS.md` 작성** — `VERCEL_TOKEN` 대시보드 토큰 교체·`BRIEFING_DISPATCH_TOKEN` fine-grained PAT 발급 절차와 확인 방법
+- [x] **상위 `alert.yml`에 dispatch 단계 추가** (상위 `0400265`) — `success() && !dry_run`일 때만, `continue-on-error`. 실패해도 상위를 실패시키지 않고 하위는 예비 cron으로 돈다
+- [ ] `VERCEL_TOKEN`을 **대시보드 토큰으로 교체** — 지금은 CLI 세션 토큰이라 `vercel logout` 하면 무효. 절차: `docs/TOKENS.md` §1
+- [ ] **`BRIEFING_DISPATCH_TOKEN` 발급**(fine-grained PAT · `krx-signal-briefing` 1개 · Contents write · 1년) → 상위 리포 Secrets. 절차: `docs/TOKENS.md` §2. **없으면 브리핑이 45분 늦게(예비 cron) 돈다**
 - [x] **5종목 손검증** (2026-08-31) — 엔투텍·씨피시스템·LG·아이텍·금호건설. **점수 산식 5/5 일치**(예: 아이텍 50−8−3+10=49). **서술의 숫자를 원천과 대조: 지어낸 사실 0건** — 아이텍 `08/28 외국인 -6.2억·개인 +5.8억`, 금호건설 `08/18 -69.9억·08/21 -92.8억·08/26 -27.0억`, 엔투텍 본문 `120억/타법인증권/사모/4.0%/1,519원/18.63%` 모두 DB와 정확히 일치
 - [x] **세 경우 대조** (2026-08-31) — ① 요약 있음 15/15·32,193토큰 ② **LLM 죽음**(키 제거) 서술 0·`summary_error` 기록 ③ **수급 없음** 15/15·23,479토큰(입력이 작아짐). **세 경우 모두 `status=ok`, 메일 2명 도착**
 

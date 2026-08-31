@@ -86,7 +86,10 @@ pytest tests/ -v    # 3. 테스트
 | `ANTHROPIC_API_KEY` | Claude 요약 (F14). 없으면 요약 없이 돌고 메일에 `⚠ 요약 생성 실패(키 없음)`이 붙는다 |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` / `SUPABASE_DATABASE_URL` | 상위와 같은 값. service key는 RLS를 우회한다 |
 | `GMAIL_ADDRESS` / `GMAIL_APP_PASSWORD` / `RECIPIENTS` | 상위와 같은 값 |
-| (상위 리포) `BRIEFING_DISPATCH_TOKEN` | fine-grained PAT — 이 리포 1개 · Contents write · 1년. 만료일은 `docs/TASKS.md` 미해소 이슈 ① |
+| `VERCEL_TOKEN` / `VERCEL_PROJECT` | 전문 페이지 배포 (F20). 없으면 링크 없이 메일이 간다. **배포 보호(SSO)를 끄지 않는다** (R7 v3.1) |
+| (상위 리포) `BRIEFING_DISPATCH_TOKEN` | fine-grained PAT — 이 리포 1개 · Contents write · 1년. 없으면 예비 cron으로 45분 늦게 돈다 |
+
+**토큰 발급·교체 절차는 `docs/TOKENS.md`에 있다.**
 
 ## 이 프로젝트에서 조심할 것
 
