@@ -228,6 +228,18 @@ def analyze(state: BriefingState) -> dict[str, Any]:
     return {"verdicts": verdicts, "summaries": out, "llm_tokens": reply.usage.total}
 
 
+def _overhang_values(b: Briefing) -> set[float]:
+    """서술이 써도 되는 오버행 숫자 — 개별 값과 **합계**.
+
+    본문이 여러 건이면 합계가 핵심이다 (엔투텍 18.63% + 5.41% = 24.04%). 개별만 허용하면
+    맞게 더한 값을 지어낸 것으로 보고 버린다 — 2026-08-31 실호출에서 실제로 겪었다.
+    """
+    values = {x.overhang_pct for x in b.bodies if x.overhang_pct is not None}
+    if len(values) > 1:
+        values.add(round(sum(values), 2))
+    return values
+
+
 def _validated(
     reply: llm.Reply,
     items: list[dict[str, Any]],
@@ -240,10 +252,7 @@ def _validated(
         [i["ticker"] for i in items],
         stands={t: v.stand for t, v in verdicts.items()},
         risk_counts={b.ticker: len(b.flags) for b in todo},
-        overhangs={
-            b.ticker: {x.overhang_pct for x in b.bodies if x.overhang_pct is not None}
-            for b in todo
-        },
+        overhangs={b.ticker: _overhang_values(b) for b in todo},
     )
 
 

@@ -485,3 +485,26 @@ def test_the_mail_has_no_link_when_the_page_failed() -> None:
     )
     assert "자세히 보기" not in out["html"]
     assert "분석 서술" in out["html"]
+
+
+def test_the_summed_overhang_is_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """본문이 여러 건이면 합계가 핵심이다 — 맞게 더한 값을 지어낸 것으로 보면 안 된다.
+
+    2026-08-31 실호출: 엔투텍 18.63% + 5.41% = 24.04%가 버려졌다.
+    """
+    from briefing.models import EventBody
+
+    b = brief(
+        bodies=(
+            EventBody(rcept_no="a", event_type="cb_issuance", overhang_pct=18.63),
+            EventBody(rcept_no="b", event_type="cb_issuance", overhang_pct=5.41),
+        )
+    )
+    assert nodes._overhang_values(b) == {18.63, 5.41, 24.04}
+
+
+def test_a_single_body_has_no_sum_to_allow() -> None:
+    from briefing.models import EventBody
+
+    b = brief(bodies=(EventBody(rcept_no="a", event_type="cb_issuance", overhang_pct=5.10),))
+    assert nodes._overhang_values(b) == {5.10}
