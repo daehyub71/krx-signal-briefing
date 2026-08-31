@@ -19,7 +19,7 @@ from typing import Any
 from langgraph.types import Send
 
 from briefing import analysis as analysing
-from briefing import corp, dart, enrich, llm, notify, store, verdict
+from briefing import corp, dart, deploy, enrich, llm, notify, page, store, verdict
 from briefing import render as rendering
 from briefing.models import WINDOW_DAYS, Briefing, RunRecord, SendResult
 from briefing.state import (
@@ -245,6 +245,27 @@ def _validated(
             for b in todo
         },
     )
+
+
+def publish(state: BriefingState) -> dict[str, Any]:
+    """전문 페이지를 만들어 Vercel에 올린다 (F20). **예외를 밖으로 내지 않는다.**
+
+    있으면 좋은 층이다 — 실패하면 `page_url`이 비고 메일은 링크 없이 간다.
+    `render`보다 **먼저** 돌아야 메일이 링크를 담을 수 있다.
+    """
+    briefings = _ordered(state)
+    if not briefings or state.get("dry_run"):
+        return {}
+    day = (state.get("data_date") or state["run_date"]).strftime("%Y%m%d")
+    try:
+        html = page.render(briefings, state.get("data_date") or state["run_date"],
+                           state.get("verdicts", {}))
+        url = deploy.deploy(day, html)
+    except Exception as exc:  # noqa: BLE001 — 페이지가 없어도 메일은 간다
+        print(f"[publish] 전문 페이지 생략: {exc}")
+        return {"page_error": str(exc)}
+    print(f"[publish] 전문 페이지 {url}")
+    return {"page_url": url}
 
 
 def render(state: BriefingState) -> dict[str, Any]:

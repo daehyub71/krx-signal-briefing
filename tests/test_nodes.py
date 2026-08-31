@@ -418,3 +418,70 @@ def test_summaries_reach_the_saved_row() -> None:
         cast("Any", st(briefings=[b], signals=[], summaries={key: "요약 한 줄"}))
     )]
     assert rows[0]["summary"] == "요약 한 줄"
+
+
+# ── publish — 전문 페이지 (F20 v2) ───────────────────────────────
+#
+# **있으면 좋은 층이다.** 배포가 실패해도 메일은 링크 없이 간다.
+
+from briefing import deploy as _deploy  # noqa: E402
+
+
+def test_publish_puts_the_url_in_the_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_deploy, "deploy", lambda day, html: f"https://x/{day}.html")
+    out = nodes.publish(cast("Any", st(briefings=[brief()], data_date=date(2026, 8, 26))))
+    assert out["page_url"] == "https://x/20260826.html"
+
+
+def test_publish_swallows_a_missing_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """키가 없어도 메일은 간다 — 링크만 빠진다."""
+    def boom(day: str, html: str) -> str:
+        raise _deploy.DeployUnavailable("VERCEL_TOKEN 없음")
+
+    monkeypatch.setattr(_deploy, "deploy", boom)
+    out = nodes.publish(cast("Any", st(briefings=[brief()], data_date=date(2026, 8, 26))))
+    assert "page_url" not in out and "VERCEL_TOKEN" in out["page_error"]
+
+
+def test_publish_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(day: str, html: str) -> str:
+        raise RuntimeError("생각지 못한 것")
+
+    monkeypatch.setattr(_deploy, "deploy", boom)
+    out = nodes.publish(cast("Any", st(briefings=[brief()], data_date=date(2026, 8, 26))))
+    assert out["page_error"]
+
+
+def test_publish_does_nothing_on_a_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    called: list[str] = []
+    def record(day: str, html: str) -> str:
+        called.append(day)
+        return "x"
+
+    monkeypatch.setattr(_deploy, "deploy", record)
+    out = nodes.publish(
+        cast("Any", st(briefings=[brief()], data_date=date(2026, 8, 26), dry_run=True))
+    )
+    assert called == [] and out == {}
+
+
+def test_the_mail_carries_the_link_when_the_page_went_up() -> None:
+    b = brief()
+    out = nodes.render(
+        cast(
+            "Any",
+            st(briefings=[b], signals=[], data_date=date(2026, 8, 26),
+               page_url="https://x/20260826.html"),
+        )
+    )
+    assert "https://x/20260826.html" in out["html"]
+
+
+def test_the_mail_has_no_link_when_the_page_failed() -> None:
+    """링크 없이도 메일은 성립한다 — 발췌는 그대로 있다."""
+    b = brief(summary="분석 서술")
+    out = nodes.render(
+        cast("Any", st(briefings=[b], signals=[], data_date=date(2026, 8, 26), page_error="x"))
+    )
+    assert "자세히 보기" not in out["html"]
+    assert "분석 서술" in out["html"]

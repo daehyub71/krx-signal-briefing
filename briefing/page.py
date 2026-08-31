@@ -42,10 +42,23 @@ from briefing.render import (
 from briefing.verdict import NEUTRAL, Verdict
 
 WIDTH = 820
-PRIVATE_NOTE = (
-    "본인 전용 페이지입니다. 링크를 공유하지 마세요 — "
-    "판정과 점수를 남에게 배포하면 유사투자자문업 신고 대상이 됩니다."
+
+# ── 반드시 있어야 하는 문구 (SPEC F20b · R7 v3, 2026-08-31) ──────
+#
+# 이 페이지는 **공개 URL**이다 (Vercel 정적 배포, D20 v2). 성격을 오해할 수 없게 못박는다.
+# 아래는 접히지도 흐려지지도 않으며, 종목 블록마다 한 번 더 반복한다.
+HEADLINE_NOTE = "투자 권고가 아닙니다 · 참고용 테스트입니다"
+WHAT_IT_IS = (
+    "개인이 만든 자동화 실험입니다. 공시·뉴스·기관/외국인 수급을 기계적으로 모아 "
+    "규칙으로 점수를 낸 결과이며, 사람이 검토한 분석이 아닙니다."
 )
+WHAT_IT_IS_NOT = (
+    "종목 추천이 아니며 매매 판단·수익을 보장하지 않습니다. "
+    "데이터 수집·판정 과정에 오류가 있을 수 있고 정확성을 보증하지 않습니다. "
+    "투자 결정과 그 결과는 전적으로 보는 사람의 몫입니다."
+)
+NO_INDEX = '<meta name="robots" content="noindex, nofollow">'
+TITLE_TAG = "신호 검증 브리핑 (참고용 테스트)"
 TITLE = "신호 검증 브리핑 · 전문"
 FLOW_ROWS = 30  # 표에 보일 거래일 수
 
@@ -85,6 +98,7 @@ def _anchor(ticker: str) -> str:
 
 
 def _head(briefings: Sequence[Briefing], data_date: date, verdicts: dict[str, Verdict]) -> str:
+    """머리 — **면책 문구가 가장 먼저 온다** (F20b). 페이지를 열면 이것부터 보인다."""
     counts: dict[str, int] = {}
     for b in briefings:
         v = verdicts.get(b.ticker)
@@ -93,14 +107,19 @@ def _head(briefings: Sequence[Briefing], data_date: date, verdicts: dict[str, Ve
     summary = " · ".join(f"{k} {v}" for k, v in counts.items()) or "대상 없음"
     y, m, d = data_date.year, data_date.month, data_date.day
     return (
-        f'<div style="padding:30px 36px 22px;border-bottom:3px solid {INK}">'
+        f'<div style="background:{THEMES["amber"][3]};color:#FFFFFF;padding:14px 36px;'
+        f'font-size:15px;font-weight:800;letter-spacing:-.01em">{HEADLINE_NOTE}</div>'
+        f'<div style="padding:26px 36px 22px;border-bottom:3px solid {INK}">'
         f'<div style="font-size:12px;letter-spacing:.14em;color:{MUTED};font-weight:700">'
         f"{TITLE} · {y}. {m:02d}. {d:02d}</div>"
         f'<div style="font-size:26px;font-weight:800;letter-spacing:-.02em;margin-top:8px">'
         f"신호 {len(briefings)}건 · {summary}</div>"
-        f'<div style="margin-top:12px;padding:9px 12px;background:{THEMES["amber"][1]};'
-        f'border:1px solid {THEMES["amber"][2]};font-size:12px;color:{THEMES["amber"][3]};'
-        f'line-height:1.6">{PRIVATE_NOTE}</div></div>'
+        f'<div style="margin-top:14px;padding:12px 14px;background:{THEMES["amber"][1]};'
+        f'border:1px solid {THEMES["amber"][2]};font-size:12.5px;color:{THEMES["amber"][3]};'
+        f'line-height:1.75">'
+        f'<b>무엇인가</b> — {WHAT_IT_IS}<br>'
+        f'<b>무엇이 아닌가</b> — {WHAT_IT_IS_NOT}<br>'
+        f'<b>점수의 한계</b> — {SCORE_LIMIT_NOTE}</div></div>'
     )
 
 
@@ -315,9 +334,11 @@ def _stock(b: Briefing, v: Verdict | None) -> str:
         if b.summary
         else f'<div style="margin-top:18px;font-size:13px;color:{DIM}">근거 서술이 없습니다.</div>'
     )
+    # 스크롤해 들어온 사람도 본다 (F20b ⑤).
     limit = (
         f'<div style="margin-top:22px;padding:12px 14px;background:{BAND};font-size:12px;'
-        f'color:{MUTED};line-height:1.7">{SCORE_LIMIT_NOTE}</div>'
+        f'color:{MUTED};line-height:1.7">'
+        f'<b style="color:{THEMES["amber"][3]}">{HEADLINE_NOTE}</b> · {SCORE_LIMIT_NOTE}</div>'
     )
     return (
         f'<div id="{_anchor(b.ticker)}" style="padding:26px 36px 0">'
@@ -355,13 +376,20 @@ def render(
         f'<div style="padding:30px 36px 40px">'
         f'<div style="border-top:3px solid {INK};padding-top:14px;font-size:12px;'
         f'color:{MUTED};line-height:1.75">'
-        f'이 페이지는 신호의 근거를 확인한 결과입니다. <b style="color:{SUB}">{LIMIT_NOTE}</b><br>'
-        f"본인 전용 — 링크를 공유하지 마세요.</div></div>"
+        f'<b style="color:{THEMES["amber"][3]}">{HEADLINE_NOTE}</b> · {LIMIT_NOTE}<br>'
+        f"{WHAT_IT_IS_NOT}</div></div>"
     )
     return (
+        "<!doctype html>\n<html lang=\"ko\">\n<head>\n"
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"{NO_INDEX}\n"
+        f"<title>{TITLE_TAG}</title>\n"
         f"<style>body{{margin:0;background:{PAGE};font-family:{FONT};color:{INK}}}"
         f"a{{color:#1F63A8;text-decoration:none}}a:hover{{text-decoration:underline}}"
-        f"table{{border-collapse:collapse}}td{{font-variant-numeric:tabular-nums}}</style>"
+        f"table{{border-collapse:collapse}}td{{font-variant-numeric:tabular-nums}}</style>\n"
+        "</head>\n<body>\n"
         f'<div style="max-width:{WIDTH}px;margin:0 auto;background:#FFFFFF">'
         f"{_head(briefings, data_date, vs)}{_toc(briefings, vs)}{stocks}{foot}</div>\n"
+        "</body>\n</html>\n"
     )

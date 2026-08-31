@@ -98,7 +98,8 @@ SKIP_WORDING: dict[str, str] = {
 # 플래그되지 않은 공시를 몇 건까지 보일지. 넘으면 "외 N건"으로 줄인다 —
 # 15종목 × 16건이면 2만 자가 넘어 읽을 수 없다 (2026-08-29 실측).
 # **플래그된 공시는 이 제한을 받지 않는다** — 그것 때문에 보내는 메일이다.
-EXCERPT_LEN = 150  # 발췌 길이 (DESIGN G10). 전문은 페이지로 보낸다
+# 발췌 길이 (DESIGN G10 v2, 2026-08-31). **메일은 간략하게** — 전문은 웹으로 보낸다.
+EXCERPT_LEN = 90
 PLAIN_DISCLOSURES = 4
 
 # 위험 유형이 없는 종목의 압축 카드 상한 (2026-08-29 합의).
@@ -426,9 +427,10 @@ STYLE = (
 )
 
 GMAIL_CLIP_BYTES = 102_400
-# HTML 원본 상한. v3.0에서 카드에 공시 본문 표·수급 표가 늘어 60,000으로는 헐거워졌다 —
-# 실측 102,371 bytes로 한계에 29 bytes 남았다 (2026-08-30). 45,000이면 여유가 20% 넘는다.
-HTML_BUDGET = 45_000
+# HTML 원본 상한. **메일은 간략하게** (D20 v2, 2026-08-31) — 상세는 웹이 담으므로
+# 예산을 넉넉히 잡을 이유가 없다. 예산을 크게 두면 남는 자리를 카드로 채워 다시 길어진다.
+# 넘치는 종목은 인덱스 표에 남고 카드는 접힌다 — 판정과 점수는 표에 그대로 있다.
+HTML_BUDGET = 28_000
 
 # 판정 색 (DESIGN G8). 국내 관행상 빨강은 상승이라 **정합만 색 계열을 뺐다** —
 # 판정은 등락과 다른 축이다. 불일치는 빨강이 직관적이라 그대로 둔다.
@@ -446,7 +448,7 @@ SCORE_LIMIT_NOTE = (
     "근거 점수가 보지 않는 것 — 실적·밸류에이션 · 업황 · 시장 전체 흐름 · 공시 이후의 주가. "
     "점수는 신호의 근거가 얼마나 받쳐지는가를 재며, 종목의 좋고 나쁨이 아닙니다."
 )
-PAGE_LINK_WORD = "전문 보기 →"
+PAGE_LINK_WORD = "자세히 보기 →"
 FOLDED_WORDING = "정기·정형 공시 {n}건은 접었습니다"
 
 
@@ -832,14 +834,14 @@ def _card(b: Briefing, v: Verdict | None, page_url: str, *, lean: bool = False) 
     """
     dot, _bg, line, _ink = THEMES.get(b.level, THEMES["none"])
     edge = STAND_THEME.get(v.stand, ("", ""))[0] if v is not None else ""
-    extra = "" if lean else f"{_flows_table(b)}{_news_block(b, COMPACT_NEWS)}"
+    # **메일은 간략하게** (D20 v2, 2026-08-31). 공시 본문 표·수급 표·뉴스는 웹이 담는다 —
+    # 메일에는 판정·근거 요약·걸린 공시·점수 근거만 싣고 나머지는 링크로 보낸다.
     return (
         f'<tr><td class="w"><table width="100%" '
         f'style="width:100%;border:1px solid {line};border-left:4px solid {edge or dot}">'
         f"{_head_band(b, v, compact=False)}"
         f"{_analysis_block(b, page_url)}"
-        f"{_disclosure_block(b, PLAIN_DISCLOSURES)}"
-        f"{_body_table(b)}{extra}"
+        f"{_disclosure_block(b, COMPACT_DISCLOSURES)}"
         f"{_meta_bar(b, v)}</table></td></tr>"
     )
 
@@ -852,7 +854,6 @@ def _card_compact(b: Briefing, v: Verdict | None, page_url: str) -> str:
         f"{_head_band(b, v, compact=True)}"
         f"{_analysis_block(b, page_url)}"
         f"{_disclosure_block(b, COMPACT_DISCLOSURES)}"
-        f"{_news_block(b, COMPACT_NEWS)}"
         f"{_meta_bar(b, v)}</table></td></tr>"
     )
 
@@ -957,7 +958,11 @@ def _shell(inner: str) -> str:
 
 
 def _header(
-    briefings: Sequence[Briefing], data_date: date, verdicts: dict[str, Verdict], err: str
+    briefings: Sequence[Briefing],
+    data_date: date,
+    verdicts: dict[str, Verdict],
+    err: str,
+    page_url: str = "",
 ) -> str:
     """머리 — 날짜 · 한 문장 · 판정 칩."""
     counts: dict[str, int] = {}
@@ -984,6 +989,13 @@ def _header(
         else ""
     )
     days = briefings[0].window_days if briefings else 30
+    link = (
+        f'<div style="margin-top:12px;font-size:12.5px;color:{SUB}">'
+        f'공시 본문 · 수급 30일 · 뉴스 · 분석 전문은 '
+        f'<a href="{escape(page_url)}" style="font-weight:700">웹에서 봅니다 →</a></div>'
+        if page_url
+        else ""
+    )
     return (
         f'<tr><td style="padding:26px 28px 20px;border-bottom:3px solid {INK}">'
         f'<div style="font-size:12px;letter-spacing:.14em;color:{MUTED};font-weight:700">'
@@ -992,7 +1004,7 @@ def _header(
         f'line-height:1.3">신호 {len(briefings)}건이 근거를 갖는지 확인했습니다</div>'
         f'<div style="margin-top:6px;font-size:12px;color:{DIM}">'
         f'최근 {days}일 공시·뉴스·수급 기준</div>'
-        f'<table style="margin-top:14px"><tr>{cells}</tr></table>{warn}</td></tr>'
+        f'<table style="margin-top:14px"><tr>{cells}</tr></table>{warn}{link}</td></tr>'
     )
 
 
@@ -1034,7 +1046,7 @@ def _build(
     """
     against = [b for b in briefings if _stand_of(b, verdicts) == "불일치"]
     rest = [b for b in briefings if _stand_of(b, verdicts) != "불일치"]
-    parts = [_header(briefings, data_date, verdicts, summary_error),
+    parts = [_header(briefings, data_date, verdicts, summary_error, page_url),
              _index_table(briefings, verdicts)]
     if against:
         shown_against = against if against_cards is None else against[:against_cards]

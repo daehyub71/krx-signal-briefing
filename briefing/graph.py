@@ -48,6 +48,7 @@ def build_graph(overrides: Mapping[str, Callable[..., Any]] | None = None) -> An
     g.add_node("load_market", pick("load_market", nodes.load_market))
     g.add_node("fetch_one", pick("fetch_one", nodes.fetch_one))
     g.add_node("analyze", pick("analyze", nodes.analyze))
+    g.add_node("publish", pick("publish", nodes.publish))
     g.add_node("render", pick("render", nodes.render))
     g.add_node("persist", pick("persist", nodes.persist))
     g.add_node("send_email", pick("send_email", nodes.send_email))
@@ -81,7 +82,9 @@ def build_graph(overrides: Mapping[str, Callable[..., Any]] | None = None) -> An
     )
     g.add_edge("fetch_one", "analyze")
 
-    g.add_edge("analyze", "render")
+    # 전문 페이지를 먼저 올려야 메일이 링크를 담는다 (F20).
+    g.add_edge("analyze", "publish")
+    g.add_edge("publish", "render")
     g.add_edge("render", "persist")
     g.add_edge("persist", "send_email")
     g.add_edge("send_email", "record_run")

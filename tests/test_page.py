@@ -86,11 +86,36 @@ def one(**kw: object) -> str:
 # ── 본인 전용 (R7 v2) ────────────────────────────────────────────
 
 
-def test_the_page_says_not_to_share_it() -> None:
-    """판정과 점수를 남에게 배포하면 유사투자자문업 신고 대상이다."""
+def test_the_disclaimer_comes_before_anything_else() -> None:
+    """공개 URL이다 (D20 v2) — 페이지를 열면 성격부터 보여야 한다 (F20b ①)."""
     doc = one()
-    assert "링크를 공유하지 마세요" in doc
-    assert "유사투자자문업" in doc
+    assert page.HEADLINE_NOTE in doc
+    body = doc[doc.index("<body>") :]
+    assert body.index(page.HEADLINE_NOTE) < body.index("씨피시스템")
+
+
+def test_the_page_says_what_it_is_and_what_it_is_not() -> None:
+    doc = one()
+    assert "자동화 실험" in doc
+    assert "종목 추천이 아니며" in doc and "정확성을 보증하지 않습니다" in doc
+
+
+def test_the_page_is_not_indexed() -> None:
+    """검색에 걸리면 '링크를 아는 사람만'이 무너진다 (F20b ⑥)."""
+    assert 'name="robots"' in one() and "noindex" in one()
+
+
+def test_the_disclaimer_repeats_on_every_stock() -> None:
+    """스크롤해 들어온 사람도 본다 (F20b ⑤)."""
+    doc = one()
+    assert doc.count(page.HEADLINE_NOTE) >= 3  # 머리 · 종목 · 꼬리
+
+
+def test_the_page_is_a_complete_document() -> None:
+    """정적 배포다 — 브라우저가 바로 열 수 있어야 한다."""
+    doc = one()
+    assert doc.startswith("<!doctype html>")
+    assert "<title>" in doc and "</html>" in doc
 
 
 def test_every_stock_repeats_what_the_score_cannot_see() -> None:
@@ -188,7 +213,7 @@ def test_a_stock_without_analysis_still_shows_its_evidence() -> None:
 
 def test_an_empty_day_renders_without_crashing() -> None:
     doc = page.render([], D, {})
-    assert "링크를 공유하지 마세요" in doc
+    assert page.HEADLINE_NOTE in doc
 
 
 def test_the_page_has_no_forbidden_word_in_our_own_sentences() -> None:
@@ -203,6 +228,9 @@ def test_the_page_has_no_forbidden_word_in_our_own_sentences() -> None:
     for n in b.news:
         ours = ours.replace(n.title, " ").replace(n.summary, " ")
     ours = ours.replace(b.summary or "", " ").replace(b.name, " ")
+    # 면책 문구는 **일부러 쓴 문장**이다 — "종목 추천이 아니며"에 `추천`이 들어 있다.
+    for fixed in (page.HEADLINE_NOTE, page.WHAT_IT_IS, page.WHAT_IT_IS_NOT):
+        ours = ours.replace(fixed, " ")
     from briefing.render import has_forbidden
 
     assert not has_forbidden(ours), has_forbidden(ours)

@@ -178,15 +178,13 @@ def test_side_signals_are_shown_as_reference() -> None:
     assert "시총 6,113억" in body
 
 
-def test_news_block_lists_title_date_and_link() -> None:
-    """뉴스 제목·날짜·링크는 HTML 본문이 담는다.
+def test_news_moved_to_the_web_page() -> None:
+    """**메일은 간략하게** (D20 v2, 2026-08-31). 뉴스 목록은 웹 전문 페이지가 담는다.
 
-    평문 대체본은 위험 종목만 펼치고 나머지는 한 줄이다 — 두 벌을 다 펴면
-    메시지가 Gmail 클리핑 한계를 넘는다 (2026-08-29).
+    메일과 평문 모두 건수만 알리고 링크로 보낸다 — 15종목 × 5건이면 메일이 잘린다.
     """
     b = briefing(news=NEWS)
-    doc = render.html([b], D)
-    assert escape(NEWS[0].title) in doc and "08/28" in doc and NEWS[0].link in doc
+    assert escape(NEWS[0].title) not in render.html([b], D)
     assert "뉴스 1건" in render.text([b], D)
 
 
@@ -242,7 +240,12 @@ def test_forbidden_word_in_a_disclosure_title_is_allowed() -> None:
 
 def test_forbidden_word_in_a_news_title_is_allowed() -> None:
     noisy = NewsItem(title="목표가 상향 소식에 매수세", link="https://n", published=D)
-    assert escape(noisy.title) in render.html([briefing(news=(noisy,))], D)
+    # 메일에서 뉴스가 빠졌으므로(D20 v2) 원문 예외는 공시 제목으로 확인한다.
+    odd = Disclosure(
+        rcept_dt=D, report_nm="투자판단관련주요경영사항(매수청구)", rcept_no="9", flr_nm="x"
+    )
+    assert escape(odd.report_nm) in render.html([briefing(disclosures=(odd,))], D)
+    assert noisy.title
 
 
 # ── HTML · 평문 ─────────────────────────────────────────────────
@@ -411,13 +414,13 @@ def test_html_never_omits_a_flagged_disclosure() -> None:
         assert d.report_nm in doc
 
 
-def test_html_caps_news_in_a_compact_card() -> None:
+def test_the_mail_no_longer_lists_news() -> None:
+    """**메일은 간략하게** (D20 v2, 2026-08-31) — 뉴스는 웹이 담는다."""
     news = tuple(
         NewsItem(title=f"뉴스제목{i}", link=f"https://n/{i}", published=D) for i in range(7)
     )
     doc = render.html([briefing("none", news=news)], D)
-    assert doc.count("뉴스제목") == render.COMPACT_NEWS
-    assert f"외 {7 - render.COMPACT_NEWS}건" in doc
+    assert "뉴스제목" not in doc
 
 
 def test_html_body_carries_no_emoji() -> None:
