@@ -104,15 +104,21 @@ create table if not exists ksb_runs (
 create index if not exists ksb_runs_by_date on ksb_runs (data_date desc);
 
 -- ─────────────────────────────────────────────
--- RLS — 읽기는 공개(뒤에 웹이 anon 키로 읽을 수 있게), 쓰기는 service_role만.
--- service_role은 RLS를 우회하므로 쓰기 정책을 따로 만들지 않는다.
--- 상위 anon 키 범위 이슈(SPEC R6)를 이 테이블로 넓히지 않는다.
+-- RLS — **정책 없음**. 읽기도 쓰기도 service_role만 (RLS를 우회한다).
+--
+-- 2026-08-31 보안 점검에서 되돌렸다. 원래는 "뒤에 웹이 anon으로 읽게" 열어 두었는데,
+-- 이 프로젝트에는 웹 층이 없고 전문 페이지는 파이프라인이 만드는 정적 HTML이다.
+-- 그동안 공개된 anon 키(상위 krx-stock-charts 번들에 실려 있다 — SPEC R6)로
+-- `ksb_briefings` 15행이 통째로 읽혔다. **실측 확인**:
+--   curl "$SUPABASE_URL/rest/v1/ksb_briefings?select=*" -H "apikey: <anon>"
+--   → 티커·종목명·공시 목록·등급·판정·근거 서술이 그대로 나온다.
+--
+-- 전문 페이지를 Vercel SSO로 잠근 이유(R7 v3.1)가 이 구멍으로 무력화된다 —
+-- 페이지를 막아도 DB에서 꺼낼 수 있으면 수신자를 한 사람으로 묶어 둔 의미가 없다.
+-- **anon이 읽을 이유가 생기기 전까지 정책을 만들지 않는다.**
 -- ─────────────────────────────────────────────
 alter table ksb_briefings enable row level security;
 alter table ksb_runs      enable row level security;
 
 drop policy if exists ksb_briefings_read on ksb_briefings;
 drop policy if exists ksb_runs_read      on ksb_runs;
-
-create policy ksb_briefings_read on ksb_briefings for select to anon, authenticated using (true);
-create policy ksb_runs_read      on ksb_runs      for select to anon, authenticated using (true);
