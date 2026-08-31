@@ -122,10 +122,10 @@ pytest tests/ -v    # 3. 테스트
 
 ## 진행 상태
 
-**M0~M3 완료** (2026-08-30) — SPEC **v2.1**. 레이아웃 재설계 합의·구현(`docs/DESIGN.md`), Claude 요약 실호출·손검증 완료. 남은 것은 **M4(워크플로·배포)·M5(마무리)**. 진도는 `docs/TASKS.md` 대시보드 참조.
+**M0~M3 완료 · M6 90% · M4 58%** (2026-08-31) — SPEC **v3.1.1**. 목적이 "신호 검증"으로 재정의됐고(§2-5), 판정·점수(F18)·근거 서술 2,000자(F19)·전문 페이지 Vercel 배포(F20)까지 CI에서 완주했다. 남은 것은 **PAT 발급 → dispatch 실동작 확인**, 보안 점검, 5거래일 관찰, M5. 진도는 `docs/TASKS.md` 대시보드 참조.
 
 | 항목 | 값 |
 |------|-----|
 | 저장소 | `daehyub71/krx-signal-briefing` (**public**) |
-| 테스트 | 378 · ruff · mypy strict 통과 · CI 녹색 |
+| 테스트 | 548 · ruff · mypy strict 통과 · CI 녹색 |
 | DB | `ksb_briefings` · `ksb_runs` 생성, RLS 확인 |

@@ -13,13 +13,13 @@
 | M0 뼈대 + 걷는 해골 | `██████████` | 100% | 12/12 | ✅ 2026-08-26 |
 | M1 DART 계층 ★ TDD | `██████████` | 100% | 10/10 | ✅ 2026-08-29 |
 | **M1b MCP 계층** (v2.0) | `██████████` | 100% | 10/10 | ✅ 2026-08-29 |
-| **M1c 뉴스** (v2.0) | `██████████` | 100% | 5/5 | ✅ 2026-08-29 |
+| **M1c 뉴스** (v2.0) | `██████████` | 100% | 8/8 | ✅ 2026-08-29 |
 | M2 본문·저장·발송 | `██████████` | 100% | 10/10 | ✅ 2026-08-29 |
 | M3 Claude 요약 | `██████████` | 100% | 8/8 | ✅ 2026-08-30 |
-| M4 자동화·배포 | `░░░░░░░░░░` | 0% | 0/11 | 🔜 |
+| M4 자동화·배포 | `██████░░░░` | 58% | 7/12 | 🔄 |
 | M5 마무리 | `░░░░░░░░░░` | 0% | 0/5 | 🔜 |
-| **M6 신호 검증 (v3.0)** | `██████████` | 96% | 22/23 | 🔄 |
-| **전체** | `████████░░` | **84%** | **78/94** | 🔄 M6 |
+| **M6 신호 검증 (v3.0)** | `█████████░` | 90% | 28/31 | 🔄 |
+| **전체** | `█████████░` | **88%** | **93/106** | 🔄 M4·M6 |
 
 범례: 🔜 대기 · 🔄 진행중 · ✅완료일
 
@@ -226,15 +226,16 @@
 
 > ⚠ **배포 전 보안 점검 필수** (SPEC N9 · 워크스페이스 CLAUDE.md)
 
-- [x] `.github/workflows/briefing.yml` — `repository_dispatch: [alert-completed]` · 예비 cron `5 0 * * 0-4`(09:05 KST, `--if-not-briefed`) · `workflow_dispatch(date, dry_run, force)` · `timeout-minutes: 25` · `permissions: contents: read` · `concurrency: briefing`(취소하지 않는다 — 메일이 반쯤 나갈 수 있다) · 입력은 env로 넘긴다(셸 보간 금지) · `python -u`(잘렸을 때 로그가 비지 않게) ~~briefing.yml~~ `repository_dispatch: types: [alert-completed]` · 예비 cron `05 00 * * 0-4`(`--if-not-briefed`) · `workflow_dispatch(date, dry_run, force)` · `timeout-minutes: 25` · `permissions: contents: read` · `concurrency: briefing`
-- [x] `main.py --if-not-briefed` — **실DB 확인** (2026-08-31): `[briefing] 2026-08-31 브리핑이 이미 있다 — 예비 cron no-op` · 종료 0. 단위 테스트 2개 기존 ~~main.py --if-not-briefed~~ — 오늘 `ksb_runs` 있으면 로그 한 줄 + 종료 0 (테스트)
-- [ ] 이 리포 Secrets 8종 등록 (`DART_API_KEY` · `ANTHROPIC_API_KEY` · `SUPABASE_URL` · `SUPABASE_SERVICE_KEY` · `SUPABASE_DATABASE_URL` · `GMAIL_ADDRESS` · `GMAIL_APP_PASSWORD` · `RECIPIENTS`)
-- [ ] Actions `workflow_dispatch --dry-run` 완주 → 실발송 1회
+- [x] `.github/workflows/briefing.yml` — `repository_dispatch: [alert-completed]` · 예비 cron `5 0 * * 0-4`(09:05 KST, `--if-not-briefed`) · `workflow_dispatch(date, dry_run, force)` · `timeout-minutes: 25` · `permissions: contents: read` · `concurrency: briefing`(취소하지 않는다 — 메일이 반쯤 나갈 수 있다) · 입력은 env로 넘긴다(셸 보간 금지) · `python -u`(잘렸을 때 로그가 비지 않게)
+- [x] `main.py --if-not-briefed` — **실DB 확인** (2026-08-31): `[briefing] 2026-08-31 브리핑이 이미 있다 — 예비 cron no-op` · 종료 0. 단위 테스트 2개 기존
+- [x] **이 리포 Secrets 12종 등록** (2026-08-31) — 위 8종 + `NAVER_CLIENT_ID`·`NAVER_CLIENT_SECRET`(F11) + `VERCEL_TOKEN`·`VERCEL_PROJECT`(F20). 값은 출력하지 않고 `.env`에서 직접 넣었다
+- [x] **Actions `workflow_dispatch` 완주 → 실발송** (2026-08-31, run `33391344626`) — **1분 19초 · success**. 게이트 ready · 시세 15/15 · **수급 15/15** · 분석 7/7 · **벨셀 배포** · 저장 15건 · 2명 발송 · `status=ok`. MCP(npx)·Secrets 12종·Supabase·Gmail·Vercel이 CI에서 전부 동작
 - [ ] **보안 점검** — 보안 리뷰 · 히스토리 시크릿 스캔(`sk-ant-` · `github_pat_` · DART 40자 hex) · 로그 마스킹(`***`) · 워크플로 권한 · `ksb_*` RLS
-- [ ] **[상위 리포] PAT 생성** — fine-grained · Repository access: `krx-signal-briefing`만 · Contents: Read and write · 만료 1년 → 상위 Secrets `BRIEFING_DISPATCH_TOKEN`. **만료일을 아래 미해소 이슈 ①에 기록**
-- [ ] **[상위 리포] `alert.yml` 마지막 단계 추가** (SPEC F0, `if: always()`) — **사용자 확인 후** 커밋 · 상위 CLAUDE.md·TASKS.md에 한 줄
-- [ ] 트리거 시험 ① — 상위 `workflow_dispatch` 수동 실행 → 이 워크플로가 **1분 안에** 시작 · 브리핑 메일 도착
-- [ ] 트리거 시험 ② — 이미 브리핑된 날 예비 cron(또는 수동 `--if-not-briefed`) → no-op 종료
+- [x] **PAT 발급 절차를 `docs/TOKENS.md` §2에 작성** — 최소 권한·확인 방법·실패 응답(404/403)까지
+- [ ] **[상위 리포] PAT 실제 발급** → 상위 Secrets `BRIEFING_DISPATCH_TOKEN` (웹에서 사람이 해야 한다). **만료일을 미해소 이슈에 기록**
+- [x] **[상위 리포] `alert.yml` dispatch 단계 추가** (2026-08-31, 상위 `0400265`) — `if: success() && !inputs.dry_run` · `continue-on-error`. **`if: always()`가 아니다**: 스크리닝이 실패한 날은 `ksa_signals`가 비어 깨워도 할 일이 없고, 하위 예비 cron이 `ksa_runs`를 보고 판단한다. 실패해도 상위를 실패시키지 않는다 — 알림은 이미 나갔다
+- [ ] 트리거 시험 ① `repository_dispatch` — 상위 수동 실행 → 이 워크플로가 1분 안에 시작. **PAT 발급 후 가능**
+- [x] **트리거 시험 ② 예비 cron no-op** (2026-08-31) — 실DB로 `--if-not-briefed` 확인: `브리핑이 이미 있다 — 예비 cron no-op` · 종료 0
 - [ ] 트리거 시험 ③ — 상위 배치 없는 날(주말) 수동 실행 → 10분 뒤 `gate_timeout` 실패 · 깃허브 실패 알림 도착
 - [ ] **연속 5거래일 관찰** — 두 메일 순서 · 도착 간격 · 요약 품질 · `ksb_runs` 상태 · 스팸함 → 「측정 기록」
 
@@ -266,6 +267,7 @@
 | **M6 상위 워크플로가 매번 죽던 진짜 이유 (2026-08-30)** | 08-27로 수동 실행하니 두 가지가 겹쳐 있었다. ① `fetch_daily_since`가 티커 2,700개를 `.in_()`에 한 번에 넣어 **PostgREST 400**(응답이 JSON이 아니라 `JSON could not be generated`로 다시 감싸져 원인이 안 보였다) ② 봉 저장이 **종목당 1회**라 일·주·월 합쳐 요청 약 8,000건 — 워크플로 제한 30분인데 40~50분이 걸린다. 300개씩 나누고 종목을 가로질러 묶어 **요청 약 20건**으로 줄였다. 재실행 성공(30분, `investorFlows: 2636`) | 2026-08-30 |
 | **M6 LLM 출력이 커져 스트리밍이 필요해짐 (2026-08-30)** | 입력 8,967 → **15,806 토큰**, 출력 상한 2,000자×15종목 ≈ 2만 토큰. `max_tokens=4096` 논스트리밍은 `APITimeoutError`로 죽었다. 스트리밍 + 32,000으로 전환 → **24,542 토큰**에 완주 | 2026-08-30 |
 | **M6 `순매도`가 금지어에 걸림 (2026-08-30)** | 분석문 **15개 전부**가 단순 금지어 검사에 걸렸다 — `순매수`·`순매도`는 수급을 말하는 유일한 말인데 `매수`·`매도`를 포함한다. `ALLOWED_COMPOUNDS`(순매수·순매도·매수세·매도세·매수관여율)를 먼저 지우고 검사하도록 바꿔 **10개가 살았다**. 나머지 5개는 `매도가 이어졌다`·`매도일이 반복되고` 같은 사실 서술인데, **사용자 결정으로 버리는 쪽을 유지**한다(2026-08-30) — 경계를 넓히는 쪽이 더 위험하다 | 2026-08-30 |
+| **M4 CI 완주 (2026-08-31)** | `workflow_dispatch`로 run `33391344626` — **1분 19초 · success**. 게이트 ready · 시세 15/15 · 수급 15/15 · 분석 7/7(6,569토큰) · 벨셀 배포 · 저장 15 · 2명 발송 · `status=ok`. MCP(npx)·Secrets 12종·Supabase·Gmail·Vercel이 러너에서 전부 동작 | 2026-08-31 |
 | **M6 합산 오버행 오탐 (2026-08-31)** | 엔투텍 서술의 `24.04%`가 지어낸 숫자로 버려졌다 — 모델이 18.63 + 5.41을 **맞게 더한** 값인데 개별 값만 허용했다. 본문이 여러 건이면 합계도 허용한다(`_overhang_values`). 고친 뒤 **15/15 통과** | 2026-08-31 |
 | **M6 비용 재측정 (2026-08-31)** | 입력이 커졌다. v2.0(80자 요약) 8,967토큰·$0.065 → **v3.0(2,000자 분석) 32,100토큰·약 $0.34(476원)**. 평일 20일이면 **월 약 9,500원**. 수급이 빠지면 23,479토큰으로 준다 | 2026-08-31 |
 | **M6 오버행 숫자 대조 오탐 (2026-08-31)** | 검증이 `표면이자 4.0%`를 오버행으로 오인해 멀쩡한 서술을 버렸다. ① 단서를 `전환`에서 뺐다 — `전환사채`·`전환가`에도 들어 있다 ② 문장 단위 대신 **숫자 앞뒤 14자 창**만 본다 — 한 문장에 `발행주식 대비 18.63%`와 `표면이자 4.0%`가 함께 오기 때문. 두 번 고쳐서 잡았다 | 2026-08-31 |
